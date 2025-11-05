@@ -1,0 +1,8 @@
+{
+  "name": "Hearth",
+  "description": "An all-in-one smart display for your home. It features a 7-day calendar, interactive widgets for weather and notes, a fun Tic-Tac-Toe game, and a voice assistant powered by Gemini for hands-free control. Designed for a touchscreen experience.",
+  "requestFramePermissions": [
+    "microphone",
+    "camera"
+  ]
+}
