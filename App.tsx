@@ -22,8 +22,9 @@ import { Loader } from './components/Loader';
 import { ProactiveSuggestionBanner } from './components/ProactiveSuggestionBanner';
 import { ScheduleDinnerModal } from './components/ScheduleDinnerModal';
 import { AiChatModal } from './components/AiChatModal';
-import { HomeIcon, NotebookTextIcon, ShoppingCartIcon, ChefHatIcon, Gamepad2Icon, CalendarPlusIcon } from './components/icons';
+import { HomeIcon, NotebookTextIcon, ShoppingCartIcon, ChefHatIcon, Gamepad2Icon, CalendarPlusIcon, TicketIcon } from './components/icons';
 import { MealPlannerApp } from './components/MealPlannerApp';
+import { LocalEvents } from './components/LocalEvents';
 import { DndProvider } from 'react-dnd';
 import { HTML5Backend } from 'react-dnd-html5-backend';
 
@@ -33,7 +34,7 @@ type ActiveInput = {
   setValue: (value: string) => void;
 } | null;
 
-export type ModalType = 'calendar' | 'games' | 'notes' | 'grocery' | 'recipes' | 'mealPlanner';
+export type ModalType = 'calendar' | 'games' | 'notes' | 'grocery' | 'recipes' | 'mealPlanner' | 'events';
 
 const today = new Date();
 const todayKey = today.toISOString().split('T')[0];
@@ -92,6 +93,7 @@ const Sidebar: React.FC<{
     { view: 'grocery', label: 'Grocery', icon: <ShoppingCartIcon className="w-7 h-7" /> },
     { view: 'recipes', label: 'Recipes', icon: <ChefHatIcon className="w-7 h-7" /> },
     { view: 'mealPlanner', label: 'Meal Plan', icon: <CalendarPlusIcon className="w-7 h-7" /> },
+    { view: 'events', label: 'Events', icon: <TicketIcon className="w-7 h-7" /> },
     { view: 'games', label: 'Games', icon: <Gamepad2Icon className="w-7 h-7" /> },
   ];
 
@@ -411,22 +413,18 @@ function AppContent() {
       showToast('Event deleted.', 'success');
   }, [showToast]);
   
-  const handleAddCalendarEvent = useCallback((dayIndex: number, title: string, time: string) => {
-      const today = new Date();
-      const targetDate = new Date(today);
-      targetDate.setDate(today.getDate() + dayIndex);
-      const dateKey = targetDate.toISOString().split('T')[0];
-      
-      const newEvent: CalendarEvent = {
-        id: Date.now(),
-        time,
-        title,
-        color: 'bg-purple-500',
-        source: 'family',
-        date: dateKey,
-      };
-      setEvents(prev => [...prev, newEvent]);
-  }, []);
+  const handleAddCalendarEvent = useCallback((title: string, date: string, time: string) => {
+    const newEvent: CalendarEvent = {
+      id: Date.now(),
+      time,
+      title,
+      color: 'bg-purple-500',
+      source: 'family',
+      date,
+    };
+    setEvents(prev => [...prev, newEvent]);
+    showToast('Event added to calendar!', 'success');
+  }, [showToast]);
   
   const handleEditCalendarEvent = useCallback((eventToEdit: CalendarEvent) => {
       setEvents(prev => prev.map(e => e.id === eventToEdit.id ? eventToEdit : e));
@@ -537,6 +535,9 @@ function AppContent() {
     if (suggestion.type === 'grocery' && suggestion.actionableItem) {
         handleAddGroceryItem(suggestion.actionableItem, 'Other');
         showToast(`Added "${suggestion.actionableItem}" to your grocery list.`, 'success');
+    } else if (suggestion.type === 'event') {
+        setActiveView('events');
+        showToast(`Here are some local events you might like!`, 'success');
     }
     setProactiveSuggestion(null);
     setLastSuggestionTimestamp(Date.now());
@@ -620,6 +621,8 @@ function AppContent() {
                 return <RecipesApp recipes={recipes} onSelectRecipe={setSelectedRecipe} isFetching={isFetchingRecipes} onSearch={handleSearchRecipes} />;
             case 'mealPlanner':
                 return <MealPlannerApp recipes={recipes} onAddCalendarEvent={handleAddCalendarEvent} onAddGroceryItem={handleAddGroceryItem} />;
+            case 'events':
+                return <LocalEvents onAddCalendarEvent={handleAddCalendarEvent} />;
             case 'games':
                 return <GamesApp initialGame={initialGame} story={story} isGenerating={isGeneratingStory} onStartStory={handleStartStory} onContinueStory={handleContinueStory} onResetStory={handleResetStory} />;
             default:

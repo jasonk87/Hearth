@@ -22,7 +22,7 @@ interface VoiceAssistantProps {
   onAddNote: (text: string) => void;
   onDeleteNote: (id: number) => void;
   eventsBySource: Record<CalendarSource, Record<string, CalendarEvent[]>>;
-  onAddCalendarEvent: (dayIndex: number, title: string, time: string) => void;
+  onAddCalendarEvent: (title: string, date: string, time: string) => void;
   onDeleteCalendarEvent: (eventId: number) => void;
   onEditCalendarEvent: (event: CalendarEvent) => void;
   groceryList: GroceryItem[];
@@ -208,7 +208,11 @@ export const VoiceAssistant: React.FC<VoiceAssistantProps> = (props) => {
         case 'addCalendarEvent': {
             const dayIndex = dayNameToIndex(args.day);
             if (dayIndex >= 0 && dayIndex < 7) {
-                props.onAddCalendarEvent(dayIndex, args.title, args.time);
+                const today = new Date();
+                const targetDate = new Date(today);
+                targetDate.setDate(today.getDate() + dayIndex);
+                const dateKey = targetDate.toISOString().split('T')[0];
+                props.onAddCalendarEvent(args.title, dateKey, args.time);
                 message = `Added "${args.title}" to ${args.day}.`;
             } else {
                 message = `Sorry, I couldn't add that event. Please specify a valid day.`;
