@@ -12,7 +12,9 @@ if (!rootElement) {
 const googleClientId = import.meta.env.VITE_GOOGLE_CLIENT_ID;
 
 const AppWrapper = () => {
-  if (googleClientId && googleClientId !== "YOUR_GOOGLE_CLIENT_ID") {
+  const useFakeData = import.meta.env.VITE_USE_FAKE_DATA === 'true';
+
+  if (!useFakeData && googleClientId && googleClientId !== "YOUR_GOOGLE_CLIENT_ID") {
     return (
       <GoogleOAuthProvider clientId={googleClientId}>
         <App />

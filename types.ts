@@ -49,7 +49,7 @@ export interface Note {
 }
 
 export interface ProactiveSuggestion {
-  type: 'grocery' | 'activity' | 'none';
+  type: 'grocery' | 'activity' | 'event' | 'none';
   suggestion: string;
   actionableItem?: string;
 }
@@ -128,4 +128,14 @@ export interface GoogleCalendarEvent {
   attendees?: {
     email: string;
   }[];
+}
+
+export interface LocalEvent {
+  id: string;
+  title: string;
+  date: string; // YYYY-MM-DD
+  time: string;
+  location: string;
+  description: string;
+  imageUrl?: string;
 }
