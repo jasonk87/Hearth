@@ -22,7 +22,10 @@ import { Loader } from './components/Loader';
 import { ProactiveSuggestionBanner } from './components/ProactiveSuggestionBanner';
 import { ScheduleDinnerModal } from './components/ScheduleDinnerModal';
 import { AiChatModal } from './components/AiChatModal';
-import { HomeIcon, NotebookTextIcon, ShoppingCartIcon, ChefHatIcon, Gamepad2Icon } from './components/icons';
+import { HomeIcon, NotebookTextIcon, ShoppingCartIcon, ChefHatIcon, Gamepad2Icon, CalendarPlusIcon } from './components/icons';
+import { MealPlannerApp } from './components/MealPlannerApp';
+import { DndProvider } from 'react-dnd';
+import { HTML5Backend } from 'react-dnd-html5-backend';
 
 type ActiveInput = {
   key: string;
@@ -30,7 +33,7 @@ type ActiveInput = {
   setValue: (value: string) => void;
 } | null;
 
-export type ModalType = 'calendar' | 'games' | 'notes' | 'grocery' | 'recipes';
+export type ModalType = 'calendar' | 'games' | 'notes' | 'grocery' | 'recipes' | 'mealPlanner';
 
 const today = new Date();
 const todayKey = today.toISOString().split('T')[0];
@@ -88,6 +91,7 @@ const Sidebar: React.FC<{
     { view: 'notes', label: 'Notes', icon: <NotebookTextIcon className="w-7 h-7" /> },
     { view: 'grocery', label: 'Grocery', icon: <ShoppingCartIcon className="w-7 h-7" /> },
     { view: 'recipes', label: 'Recipes', icon: <ChefHatIcon className="w-7 h-7" /> },
+    { view: 'mealPlanner', label: 'Meal Plan', icon: <CalendarPlusIcon className="w-7 h-7" /> },
     { view: 'games', label: 'Games', icon: <Gamepad2Icon className="w-7 h-7" /> },
   ];
 
@@ -614,6 +618,8 @@ function AppContent() {
                 return <GroceryApp items={groceryList} onToggle={handleToggleGroceryItem} onAdd={handleAddGroceryItem} onClearCompleted={handleClearCompletedGroceries} newItemName={newGroceryItemName} setNewItemName={syncSetValue('new-grocery-name', setNewGroceryItemName)} onNewItemNameFocus={() => handleSetActiveInput('new-grocery-name', newGroceryItemName, setNewGroceryItemName)} activeInputKey={activeInput?.key} />;
             case 'recipes':
                 return <RecipesApp recipes={recipes} onSelectRecipe={setSelectedRecipe} isFetching={isFetchingRecipes} onSearch={handleSearchRecipes} />;
+            case 'mealPlanner':
+                return <MealPlannerApp recipes={recipes} onAddCalendarEvent={handleAddCalendarEvent} onAddGroceryItem={handleAddGroceryItem} />;
             case 'games':
                 return <GamesApp initialGame={initialGame} story={story} isGenerating={isGeneratingStory} onStartStory={handleStartStory} onContinueStory={handleContinueStory} onResetStory={handleResetStory} />;
             default:
@@ -763,9 +769,11 @@ function AppContent() {
 
 function App() {
     return (
-        <ToastProvider>
-            <AppContent />
-        </ToastProvider>
+        <DndProvider backend={HTML5Backend}>
+            <ToastProvider>
+                <AppContent />
+            </ToastProvider>
+        </DndProvider>
     );
 }
 

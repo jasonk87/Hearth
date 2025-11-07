@@ -1,9 +1,9 @@
 
-
 import React, { useState, useCallback } from 'react';
 import type { Recipe } from '../types';
 import { RefreshCwIcon } from './icons';
 import { MicInputButton } from './MicInputButton';
+import { DraggableRecipeCard } from './DraggableRecipeCard';
 
 interface RecipesAppProps {
   recipes: Recipe[];
@@ -64,14 +64,11 @@ export const RecipesApp: React.FC<RecipesAppProps> = ({ recipes, onSelectRecipe,
       ) : (
         <div className="flex-grow overflow-y-auto pr-2 grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
           {recipes.map((recipe, index) => (
-            <button 
+            <DraggableRecipeCard
               key={index}
+              recipe={recipe}
               onClick={() => onSelectRecipe(recipe)}
-              className="text-left bg-white/50 p-4 rounded-xl border border-transparent hover:border-teal-500 cursor-pointer transition-all duration-300 transform hover:scale-105 hover:bg-white/80 flex flex-col"
-            >
-              <h3 className="text-lg font-bold text-teal-700 mb-2">{recipe.recipeName}</h3>
-              <p className="text-slate-600 text-sm flex-grow">{recipe.description}</p>
-            </button>
+            />
           ))}
            {recipes.length === 0 && !isFetching && (
                 <div className="text-center text-slate-500 md:col-span-2 lg:col-span-3 py-10">
