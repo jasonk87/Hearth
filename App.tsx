@@ -2,7 +2,7 @@
 import React, { useState, useCallback, useMemo, useEffect, useRef } from 'react';
 import { VoiceAssistant } from './components/VoiceAssistant';
 import OnScreenKeyboard from './components/OnScreenKeyboard';
-import type { CalendarEvent, WeatherData, GroceryItem, CalendarSource, Game, Note, NoteColor, User, Recipe, ProactiveSuggestion, ChatMessage, StoryPage } from './types';
+import type { CalendarEvent, WeatherData, GroceryItem, CalendarSource, Game, Note, NoteColor, User, Recipe, ProactiveSuggestion, ChatMessage, StoryPage, GoogleProfile, GoogleCalendarEvent } from './types';
 import { CalendarApp } from './components/CalendarApp';
 import { GamesApp } from './components/GamesApp';
 import { NotesApp } from './components/NotesApp';
@@ -15,6 +15,8 @@ import { initAudioOnInteraction, playSound } from './services/soundService';
 import { RecipesApp } from './components/RecipesApp';
 import { RecipeDetailView } from './components/RecipeDetailView';
 import { getProactiveSuggestion, getPersonalizedRecipes, searchRecipes, generateDailyBriefing, generateStorySegment, generateStoryImage, getWeatherForecast } from './services/geminiService';
+import { setAccessToken, logout, getProfile, getAccessToken, getCalendarEvents } from './services/authService';
+import GoogleAuth from './components/GoogleAuth';
 import { DailyBriefing } from './components/DailyBriefing';
 import { Loader } from './components/Loader';
 import { ProactiveSuggestionBanner } from './components/ProactiveSuggestionBanner';
@@ -159,10 +161,34 @@ function AppContent() {
   // New state for Storyboard
   const [story, setStory] = useState<StoryPage[]>([]);
   const [isGeneratingStory, setIsGeneratingStory] = useState(false);
+  const [profile, setProfile] = useState<GoogleProfile | null>(null);
 
   const { showToast } = useToast();
   
   const [audioInitialized, setAudioInitialized] = useState(false);
+
+  useEffect(() => {
+    if (getAccessToken()) {
+      getProfile().then(setProfile);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (profile) {
+      getCalendarEvents().then((events) => {
+        const formattedEvents = events.map((event: GoogleCalendarEvent) => ({
+            id: event.id,
+            time: new Date(event.start.dateTime).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+            title: event.summary,
+            color: 'bg-blue-500',
+            source: 'google',
+            participants: event.attendees ? event.attendees.map((a) => a.email) : [],
+            date: event.start.dateTime.split('T')[0],
+        }));
+        setEvents(formattedEvents);
+      });
+    }
+  }, [profile]);
 
   const handleInteraction = useCallback(() => {
       if (!audioInitialized) {
@@ -610,6 +636,30 @@ function AppContent() {
         <main className="flex-1 flex flex-col relative overflow-hidden">
             <header className="flex justify-between items-center flex-shrink-0 p-6">
                 <h1 className="text-3xl font-bold text-teal-600 drop-shadow-sm">{getHeaderText()}</h1>
+                <div>
+                    {profile ? (
+                        <div className="flex items-center gap-4">
+                            <img src={profile.picture} alt="user image" className="w-10 h-10 rounded-full" />
+                            <button onClick={() => {
+                                logout();
+                                setProfile(null);
+                            }} className="text-sm font-medium text-slate-600 hover:text-slate-900">Log out</button>
+                        </div>
+                    ) : (
+                        <>
+                            {import.meta.env.VITE_USE_FAKE_DATA === 'true' ? (
+                                <button onClick={() => {
+                                    setAccessToken('fake_token');
+                                    getProfile().then(setProfile);
+                                }} className="ml-4 text-sm font-medium text-slate-600 hover:text-slate-900">
+                                    Login with Fake User
+                                </button>
+                            ) : (
+                                <GoogleAuth setProfile={setProfile} />
+                            )}
+                        </>
+                    )}
+                </div>
             </header>
             
             <div className="relative flex-1 px-6 pb-6 pt-0 min-h-0">
