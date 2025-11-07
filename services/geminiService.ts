@@ -140,6 +140,9 @@ export async function getPersonalizedRecipes(): Promise<Recipe[]> {
 }
 
 export async function searchRecipes(query: string): Promise<Recipe[]> {
+    if (import.meta.env.VITE_USE_FAKE_DATA === 'true') {
+        return Promise.resolve(MOCK_RECIPES);
+    }
     const prompt = `Find 5 recipes for ${query}.`;
 
     const response = await ai.models.generateContent({
@@ -164,6 +167,9 @@ export async function generateDailyBriefing(
     events: CalendarEvent[],
     weather: WeatherData
 ): Promise<string> {
+    if (import.meta.env.VITE_USE_FAKE_DATA === 'true') {
+        return Promise.resolve("Good morning! The weather is sunny with a high of 72 degrees. You have one event today: a team stand-up at 10am. Have a great day!");
+    }
     const today = new Date().toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric' });
     
     const eventsString = events.length > 0
@@ -193,6 +199,9 @@ export async function generateDailyBriefing(
 }
 
 export async function getBriefingAudio(text: string): Promise<string> {
+    if (import.meta.env.VITE_USE_FAKE_DATA === 'true') {
+        return Promise.resolve("");
+    }
     const response = await ai.models.generateContent({
         model: "gemini-2.5-flash-preview-tts",
         contents: [{ parts: [{ text: text }] }],
@@ -215,6 +224,9 @@ export async function getBriefingAudio(text: string): Promise<string> {
 
 // --- Storyboard Generation ---
 export async function generateStorySegment(prompt: string, existingStory: string = ''): Promise<string> {
+    if (import.meta.env.VITE_USE_FAKE_DATA === 'true') {
+        return Promise.resolve("Once upon a time, in a land filled with candy castles and chocolate rivers, lived a friendly dragon named Sparky. Sparky loved to fly, but he was afraid of heights.");
+    }
     const fullPrompt = existingStory 
         ? `Continue this children's story. Keep the tone whimsical and imaginative. Write only one or two new paragraphs. STORY SO FAR:\n\n${existingStory}\n\n CONTINUE THE STORY:`
         : `Write the beginning of a children's story based on this prompt: "${prompt}". Keep the tone whimsical and imaginative. Write only one or two paragraphs.`;
@@ -232,6 +244,9 @@ export async function generateStorySegment(prompt: string, existingStory: string
 }
 
 export async function generateStoryImage(textSegment: string): Promise<string> {
+    if (import.meta.env.VITE_USE_FAKE_DATA === 'true') {
+        return Promise.resolve("https://via.placeholder.com/512x384.png?text=Whimsical+Dragon");
+    }
     const prompt = `A beautiful, whimsical, watercolor illustration for a children's storybook, depicting the following scene: ${textSegment}`;
     
     const response = await ai.models.generateImages({
@@ -359,6 +374,9 @@ const hangmanWordSchema = {
 };
 
 export async function getHangmanWord(): Promise<HangmanWord> {
+    if (import.meta.env.VITE_USE_FAKE_DATA === 'true') {
+        return Promise.resolve({ word: "developer", hint: "Someone who writes code" });
+    }
     const prompt = `Generate a single, moderately difficult, family-friendly English word for a game of Hangman. The word should be between 5 and 10 letters long. Also, provide a short hint for the word. Ensure the word is lowercase.`;
 
     try {
@@ -679,6 +697,9 @@ export const startStoryFunctionDeclaration: FunctionDeclaration = {
 
 // --- Audio Transcription ---
 export async function transcribeAudio(base64Audio: string, mimeType: string): Promise<string> {
+    if (import.meta.env.VITE_USE_FAKE_DATA === 'true') {
+        return Promise.resolve("This is a mock transcription.");
+    }
     try {
         const audioPart = {
             inlineData: {
@@ -703,6 +724,9 @@ export async function transcribeAudio(base64Audio: string, mimeType: string): Pr
 // FIX: Added missing recognizeUser function to resolve import error in UserRecognition.tsx.
 // --- User Recognition ---
 export async function recognizeUser(base64Image: string, enrolledUsers: User[]): Promise<string | null> {
+    if (import.meta.env.VITE_USE_FAKE_DATA === 'true') {
+        return Promise.resolve(null);
+    }
     if (enrolledUsers.length === 0) {
         return null;
     }
@@ -759,7 +783,7 @@ export function decode(base64: string): Uint8Array {
   const binaryString = atob(base64);
   const len = binaryString.length;
   const bytes = new Uint8Array(len);
-  for (let i = 0; i_test < len; i++) {
+  for (let i = 0; i < len; i++) {
     bytes[i] = binaryString.charCodeAt(i);
   }
   return bytes;
