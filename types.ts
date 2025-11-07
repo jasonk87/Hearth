@@ -113,3 +113,19 @@ export interface SmartHomeState {
   lights: Record<string, Light>;
   thermostat: Thermostat;
 }
+
+export interface GoogleProfile {
+  name: string;
+  picture: string;
+}
+
+export interface GoogleCalendarEvent {
+  id: string;
+  summary: string;
+  start: {
+    dateTime: string;
+  };
+  attendees?: {
+    email: string;
+  }[];
+}
