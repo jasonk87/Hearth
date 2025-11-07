@@ -2,11 +2,36 @@
 import { GoogleGenAI, FunctionDeclaration, Type, Blob, Modality } from '@google/genai';
 import type { User, Recipe, CalendarEvent, WeatherData, GroceryItem, ProactiveSuggestion, HangmanWord } from '../types';
 
-if (!process.env.API_KEY) {
-  throw new Error("API_KEY environment variable not set");
+if (!import.meta.env.VITE_GEMINI_API_KEY && import.meta.env.VITE_USE_FAKE_DATA !== 'true') {
+  throw new Error("VITE_GEMINI_API_KEY environment variable not set");
 }
 
-export const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
+export const ai = new GoogleGenAI({ apiKey: import.meta.env.VITE_GEMINI_API_KEY });
+
+const MOCK_RECIPES: Recipe[] = [
+    {
+        recipeName: 'Classic Pancakes',
+        description: 'Fluffy and delicious pancakes, a perfect start to your day.',
+        ingredients: ['1 1/2 cups all-purpose flour', '3 1/2 teaspoons baking powder', '1 teaspoon salt', '1 tablespoon white sugar', '1 1/4 cups milk', '1 egg', '3 tablespoons butter, melted'],
+        instructions: ['In a large bowl, sift together the flour, baking powder, salt and sugar.', 'Make a well in the center and pour in the milk, egg and melted butter; mix until smooth.', 'Heat a lightly oiled griddle or frying pan over medium high heat.', 'Pour or scoop the batter onto the griddle, using approximately 1/4 cup for each pancake.', 'Brown on both sides and serve hot.'],
+    },
+    {
+        recipeName: 'Chicken Stir-Fry',
+        description: 'A quick and healthy stir-fry with tender chicken and fresh vegetables.',
+        ingredients: ['1 lb boneless, skinless chicken breast, cut into bite-sized pieces', '1 tablespoon soy sauce', '1 teaspoon cornstarch', '1 tablespoon vegetable oil', '1 cup broccoli florets', '1/2 red bell pepper, sliced', '1/4 cup chicken broth'],
+        instructions: ['In a small bowl, toss the chicken with soy sauce and cornstarch.', 'Heat the oil in a large skillet or wok over medium-high heat.', 'Add the chicken and cook until browned and cooked through.', 'Add the broccoli and bell pepper and cook for 3-4 minutes, or until tender-crisp.', 'Stir in the chicken broth and bring to a simmer.', 'Serve immediately with rice or noodles.'],
+    },
+];
+
+const MOCK_WEATHER: WeatherData[] = [
+    { day: 'Mon', temp: 72, condition: 'sunny', hourly: [{time: '3 PM', temp: 75, condition: 'sunny'}] },
+    { day: 'Tue', temp: 68, condition: 'partly-cloudy' },
+    { day: 'Wed', temp: 65, condition: 'rainy' },
+    { day: 'Thu', temp: 70, condition: 'cloudy' },
+    { day: 'Fri', temp: 75, condition: 'sunny' },
+    { day: 'Sat', temp: 78, condition: 'sunny' },
+    { day: 'Sun', temp: 76, condition: 'partly-cloudy' },
+];
 
 // --- Recipe Generation ---
 
@@ -46,6 +71,9 @@ interface RecipeCache {
 }
 
 export async function getPersonalizedRecipes(): Promise<Recipe[]> {
+    if (import.meta.env.VITE_USE_FAKE_DATA === 'true') {
+        return Promise.resolve(MOCK_RECIPES);
+    }
     const todayKey = new Date().toISOString().split('T')[0];
     const hours = new Date().getHours();
     const mealType: MealType = hours < 11 ? 'breakfast' : hours < 16 ? 'lunch' : 'dinner';
@@ -250,6 +278,9 @@ export async function getProactiveSuggestion(
     groceryList: GroceryItem[],
     weather: WeatherData
 ): Promise<ProactiveSuggestion | null> {
+    if (import.meta.env.VITE_USE_FAKE_DATA === 'true') {
+        return Promise.resolve(null);
+    }
     const relevantEvents = events.filter(e => {
         const eventDate = new Date(e.date);
         const today = new Date();
@@ -358,6 +389,9 @@ export async function getHangmanWord(): Promise<HangmanWord> {
 
 // --- Weather ---
 export async function getWeatherForecast(): Promise<WeatherData[]> {
+    if (import.meta.env.VITE_USE_FAKE_DATA === 'true') {
+        return Promise.resolve(MOCK_WEATHER);
+    }
     const weatherSchema = {
         type: Type.OBJECT,
         properties: {
@@ -725,7 +759,7 @@ export function decode(base64: string): Uint8Array {
   const binaryString = atob(base64);
   const len = binaryString.length;
   const bytes = new Uint8Array(len);
-  for (let i = 0; i < len; i++) {
+  for (let i = 0; i_test < len; i++) {
     bytes[i] = binaryString.charCodeAt(i);
   }
   return bytes;
