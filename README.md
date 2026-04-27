@@ -6,6 +6,59 @@
 
 Hearth is a smart home assistant that helps you manage your daily life. It provides a calendar, weather forecasts, recipes, games, and a voice assistant to help you with your daily tasks.
 
+## Product Direction: TV-First, Voice-First, Touch-Ready
+
+If Hearth is meant to live on a flat-screen TV, the UX should be optimized for **distance, low precision input, and hands-free control**.
+
+### Design Principles
+
+- **Voice-first navigation:** Every key action should be available by natural-language command.
+- **Touch-safe fallback:** Any voice flow should also be completable with large touch targets.
+- **10-foot UI readability:** Prioritize large typography, high contrast, and simple layouts.
+- **Always-recoverable interaction:** Users should be able to say “go back”, “cancel”, or “help” from any screen.
+
+### What to Build Next (Priority Roadmap)
+
+1. **Unified Voice Command Router**
+   - Add a central intent map for global commands like “open calendar”, “add note”, “next recipe”, and “turn off lights”.
+   - Route commands to app modules consistently instead of per-component voice handling.
+
+2. **Global Interaction Contract**
+   - Standardize commands: `open`, `close`, `back`, `confirm`, `cancel`, `scroll`, `select <item>`.
+   - Mirror each command with visible on-screen hints and tappable controls.
+
+3. **TV Interaction Mode**
+   - Add a dedicated layout mode for large displays with:
+     - Minimum 48–64px touch targets
+     - Focus outlines for keyboard/remote navigation
+     - Reduced on-screen density and larger default text
+
+4. **Voice Confirmation for Risky Actions**
+   - Require confirmation for destructive/important actions (delete, send, schedule, unlock).
+   - Use a short verbal confirmation pattern: “Do you want me to send this message to Alex?”
+
+5. **Accessibility + Reliability Layer**
+   - Add transcript and subtitle-style feedback for recognized speech.
+   - Add timeout/retry handling and explicit “I didn’t catch that” recoveries.
+   - Ensure all controls have accessible labels and deterministic focus order.
+
+### Definition of Done for “Fully Interactable by Voice + Touch”
+
+For each feature, verify:
+
+- The feature can be launched, used, and exited with voice only.
+- The same full workflow can be completed with touch only.
+- Every step has clear state feedback (spoken and visual).
+- Error states are recoverable without restarting the app.
+
+### Suggested Metrics
+
+- Task completion rate (voice-only, touch-only)
+- Average time-to-task for common flows
+- Voice fallback rate (how often users switch to touch)
+- Misrecognition rate and recovery success rate
+- 7-day retention in living-room usage windows
+
 ## Getting Started
 
 **Prerequisites:** Node.js
