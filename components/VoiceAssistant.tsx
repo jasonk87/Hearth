@@ -52,11 +52,18 @@ const dayNameToIndex = (dayName: string): number => {
     return diff >= 0 ? diff : diff + 7;
 };
 
-const findEventByDetails = (eventsBySource: Record<CalendarSource, Record<string, CalendarEvent[]>>, dayIndex: number, title: string, time?: string): CalendarEvent | null => {
-    const today = new Date();
-    const targetDate = new Date(today);
-    targetDate.setDate(today.getDate() + dayIndex);
-    const dayKey = targetDate.toISOString().split('T')[0];
+const findEventByDetails = (eventsBySource: Record<CalendarSource, Record<string, CalendarEvent[]>>, dayIndex: number | string, title: string, time?: string): CalendarEvent | null => {
+    let dayKey: string;
+    
+    if (typeof dayIndex === 'string') {
+        dayKey = dayIndex;
+    } else {
+        const today = new Date();
+        const targetDate = new Date(today);
+        targetDate.setDate(today.getDate() + dayIndex);
+        dayKey = targetDate.toISOString().split('T')[0];
+    }
+
     const lowerTitle = title.toLowerCase();
 
     for (const source of Object.keys(eventsBySource) as CalendarSource[]) {
@@ -102,6 +109,7 @@ export const VoiceAssistant: React.FC<VoiceAssistantProps> = (props) => {
         mediaStreamRef.current = null;
     }
     if (scriptProcessorRef.current) {
+        scriptProcessorRef.current.onaudioprocess = null;
         scriptProcessorRef.current.disconnect();
         scriptProcessorRef.current = null;
     }
@@ -140,14 +148,20 @@ export const VoiceAssistant: React.FC<VoiceAssistantProps> = (props) => {
             break;
         }
         case 'setDinnerPlan': {
-            const dayIndex = dayNameToIndex(args.day);
-            if (dayIndex >= 0) {
-                const today = new Date();
-                const targetDate = new Date(today);
-                targetDate.setDate(today.getDate() + dayIndex);
-                const dateKey = targetDate.toISOString().split('T')[0];
+            let dateKey = args.date;
+            if (!dateKey) {
+                const dayIndex = dayNameToIndex(args.day);
+                if (dayIndex >= 0) {
+                    const today = new Date();
+                    const targetDate = new Date(today);
+                    targetDate.setDate(today.getDate() + dayIndex);
+                    dateKey = targetDate.toISOString().split('T')[0];
+                }
+            }
+
+            if (dateKey) {
                 props.onSetDinnerForDay(dateKey, args.mealName);
-                message = `OK, I've set ${args.mealName} for dinner on ${args.day}.`;
+                message = `OK, I've set ${args.mealName} for dinner.`;
             } else {
                 message = `Sorry, I couldn't understand which day you meant.`;
                 messageType = 'error';
@@ -211,14 +225,20 @@ export const VoiceAssistant: React.FC<VoiceAssistantProps> = (props) => {
             break;
         }
         case 'addCalendarEvent': {
-            const dayIndex = dayNameToIndex(args.day);
-            if (dayIndex >= 0 && dayIndex < 7) {
-                const today = new Date();
-                const targetDate = new Date(today);
-                targetDate.setDate(today.getDate() + dayIndex);
-                const dateKey = targetDate.toISOString().split('T')[0];
+            let dateKey = args.date;
+            if (!dateKey) {
+                const dayIndex = dayNameToIndex(args.day);
+                if (dayIndex >= 0 && dayIndex < 7) {
+                    const today = new Date();
+                    const targetDate = new Date(today);
+                    targetDate.setDate(today.getDate() + dayIndex);
+                    dateKey = targetDate.toISOString().split('T')[0];
+                }
+            }
+
+            if (dateKey) {
                 props.onAddCalendarEvent(args.title, dateKey, args.time);
-                message = `Added "${args.title}" to ${args.day}.`;
+                message = `Added "${args.title}".`;
             } else {
                 message = `Sorry, I couldn't add that event. Please specify a valid day.`;
                 messageType = 'error';
@@ -226,33 +246,47 @@ export const VoiceAssistant: React.FC<VoiceAssistantProps> = (props) => {
             break;
         }
         case 'deleteCalendarEvent': {
-            const dayIndex = dayNameToIndex(args.day);
-            if (dayIndex < 0) {
+            let searchKey: string | number = args.date;
+            if (!searchKey) {
+                const dayIndex = dayNameToIndex(args.day);
+                if (dayIndex >= 0) {
+                    searchKey = dayIndex;
+                }
+            }
+
+            if (searchKey === undefined) {
                  message = `Sorry, I couldn't understand which day you meant.`;
                  messageType = 'error';
                  break;
             }
-            const eventToDelete = findEventByDetails(props.eventsBySource, dayIndex, args.title, args.time);
+            const eventToDelete = findEventByDetails(props.eventsBySource, searchKey, args.title, args.time);
             if(eventToDelete) {
-                props.onDeleteCalendarEvent(eventToDelete.id);
+                props.onDeleteCalendarEvent(Number(eventToDelete.id));
                 message = `Removed "${eventToDelete.title}" from the calendar.`;
             } else {
-                message = `Sorry, I couldn't find "${args.title}" for ${args.day}.`;
+                message = `Sorry, I couldn't find "${args.title}".`;
                 messageType = 'error';
             }
             break;
         }
         case 'editCalendarEvent': {
-            const dayIndex = dayNameToIndex(args.day);
-            if (dayIndex < 0) {
+            let searchKey: string | number = args.date;
+            if (!searchKey) {
+                const dayIndex = dayNameToIndex(args.day);
+                if (dayIndex >= 0) {
+                    searchKey = dayIndex;
+                }
+            }
+
+            if (searchKey === undefined) {
                 message = `Sorry, I couldn't understand which day you meant.`;
                 messageType = 'error';
                 break;
             }
 
-            const eventToEdit = findEventByDetails(props.eventsBySource, dayIndex, args.originalTitle);
+            const eventToEdit = findEventByDetails(props.eventsBySource, searchKey, args.originalTitle);
             if (!eventToEdit) {
-                message = `I couldn't find "${args.originalTitle}" on ${args.day}.`;
+                message = `I couldn't find "${args.originalTitle}".`;
                 messageType = 'error';
                 break;
             }
@@ -369,6 +403,7 @@ export const VoiceAssistant: React.FC<VoiceAssistantProps> = (props) => {
                         const session = await sessionPromiseRef.current;
                         if (!session) return;
 
+                        // Process tool calls sequentially to ensure proper awaiting
                         for (const fc of message.toolCall.functionCalls) {
                            if (!processedToolCallIds.current.has(fc.id)) {
                                processedToolCallIds.current.add(fc.id);
@@ -385,8 +420,10 @@ export const VoiceAssistant: React.FC<VoiceAssistantProps> = (props) => {
                     }
                     
                     if (message.serverContent?.turnComplete) {
-                        if (!toolCallMadeInTurn.current && userInputRef.current) {
-                            handleAskAi(userInputRef.current);
+                        // Capture the current input before it gets reset or overwritten
+                        const finalInput = userInputRef.current;
+                        if (!toolCallMadeInTurn.current && finalInput) {
+                            handleAskAi(finalInput);
                         }
                         stopListening();
                     }
