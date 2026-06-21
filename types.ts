@@ -13,7 +13,7 @@ export interface User {
 }
 
 export interface CalendarEvent {
-  id: number;
+  id: number | string;
   time: string;
   title: string;
   color: string; // Maintained for background, but border will indicate owner

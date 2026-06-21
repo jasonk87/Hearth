@@ -23,7 +23,7 @@ interface VoiceAssistantProps {
   onDeleteNote: (id: number) => void;
   eventsBySource: Record<CalendarSource, Record<string, CalendarEvent[]>>;
   onAddCalendarEvent: (title: string, date: string, time: string) => void;
-  onDeleteCalendarEvent: (eventId: number) => void;
+  onDeleteCalendarEvent: (eventId: number | string) => void;
   onEditCalendarEvent: (event: CalendarEvent) => void;
   groceryList: GroceryItem[];
   onAddGroceryItem: (name: string, section: string) => void;
@@ -83,6 +83,7 @@ const findEventByDetails = (eventsBySource: Record<CalendarSource, Record<string
 
 export const VoiceAssistant: React.FC<VoiceAssistantProps> = (props) => {
   const [isListening, setIsListening] = useState(false);
+  const isListeningRef = useRef(false);
   const { showToast } = useToast();
   const sessionPromiseRef = useRef<Promise<Session> | null>(null);
   const mediaStreamRef = useRef<MediaStream | null>(null);
@@ -121,6 +122,7 @@ export const VoiceAssistant: React.FC<VoiceAssistantProps> = (props) => {
         audioContextRef.current.close().catch(e => console.error("Error closing audio context:", e));
         audioContextRef.current = null;
     }
+    isListeningRef.current = false;
     setIsListening(false);
   }, []);
 
@@ -261,7 +263,7 @@ export const VoiceAssistant: React.FC<VoiceAssistantProps> = (props) => {
             }
             const eventToDelete = findEventByDetails(props.eventsBySource, searchKey, args.title, args.time);
             if(eventToDelete) {
-                props.onDeleteCalendarEvent(Number(eventToDelete.id));
+                props.onDeleteCalendarEvent(eventToDelete.id);
                 message = `Removed "${eventToDelete.title}" from the calendar.`;
             } else {
                 message = `Sorry, I couldn't find "${args.title}".`;
@@ -323,6 +325,7 @@ export const VoiceAssistant: React.FC<VoiceAssistantProps> = (props) => {
   }, [props, showToast]);
 
   const startListening = useCallback(async () => {
+    isListeningRef.current = true;
     setIsListening(true);
 
     const handleAskAi = async (query: string) => {
@@ -345,6 +348,13 @@ export const VoiceAssistant: React.FC<VoiceAssistantProps> = (props) => {
 
     try {
         const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+        
+        if (!isListeningRef.current) {
+            // User cancelled before media device stream could initialize
+            stream.getTracks().forEach(track => track.stop());
+            return;
+        }
+
         mediaStreamRef.current = stream;
         
         audioContextRef.current = new (window.AudioContext || (window as any).webkitAudioContext)({ sampleRate: 16000 });
@@ -439,12 +449,13 @@ export const VoiceAssistant: React.FC<VoiceAssistantProps> = (props) => {
     } catch (error) {
         console.error('Error starting voice assistant:', error);
         showToast('Could not start microphone.', 'error');
+        isListeningRef.current = false;
         setIsListening(false);
     }
   }, [stopListening, handleToolCall, showToast, props.onGeneralQuery]);
 
   const toggleListening = () => {
-    if (isListening) {
+    if (isListeningRef.current) {
       stopListening();
     } else {
       startListening();
