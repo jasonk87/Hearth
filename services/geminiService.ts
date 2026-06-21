@@ -277,7 +277,7 @@ export async function transcribeAudio(base64Audio: string, mimeType: string): Pr
             contents: { parts: [audioPart, textPart] },
             config: {
                 thinkingConfig: {
-                    thinkingBudget: 24576,
+                    thinkingBudget: 0,
                 }
             }
         });

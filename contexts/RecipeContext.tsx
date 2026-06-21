@@ -1,5 +1,6 @@
-import React, { createContext, useContext, useState, useEffect, ReactNode } from 'react';
+import React, { createContext, useContext, ReactNode } from 'react';
 import { Recipe } from '../types';
+import { usePersistentState } from './PersistentStateContext';
 
 interface RecipeContextType {
     savedRecipes: Recipe[];
@@ -10,25 +11,12 @@ interface RecipeContextType {
 
 const RecipeContext = createContext<RecipeContextType | undefined>(undefined);
 
-const SAVED_RECIPES_KEY = 'hearth_saved_recipes';
-
 export const RecipeProvider: React.FC<{ children: ReactNode }> = ({ children }) => {
-    const [savedRecipes, setSavedRecipes] = useState<Recipe[]>(() => {
-        try {
-            const saved = localStorage.getItem(SAVED_RECIPES_KEY);
-            return saved ? JSON.parse(saved) : [];
-        } catch (e) {
-            console.error("Failed to load saved recipes", e);
-            return [];
-        }
-    });
-
-    useEffect(() => {
-        localStorage.setItem(SAVED_RECIPES_KEY, JSON.stringify(savedRecipes));
-    }, [savedRecipes]);
+    const { state, setField } = usePersistentState();
+    const savedRecipes = state.savedRecipes;
 
     const saveRecipe = (recipe: Recipe) => {
-        setSavedRecipes(prev => {
+        setField('savedRecipes', prev => {
             if (!prev.some(r => r.id === recipe.id)) {
                 return [recipe, ...prev];
             }
@@ -37,7 +25,7 @@ export const RecipeProvider: React.FC<{ children: ReactNode }> = ({ children }) 
     };
 
     const removeRecipe = (recipeId: string) => {
-        setSavedRecipes(prev => prev.filter(r => r.id !== recipeId));
+        setField('savedRecipes', prev => prev.filter(r => r.id !== recipeId));
     };
 
     const isRecipeSaved = (recipeId: string) => {

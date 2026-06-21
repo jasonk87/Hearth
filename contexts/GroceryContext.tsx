@@ -1,11 +1,14 @@
 import React, { createContext, useContext, useState, useCallback } from 'react';
 import { GroceryItem, Recipe } from '../types';
 import { playSound } from '../services/soundService';
+import { usePersistentState } from './PersistentStateContext';
 
 interface GroceryContextType {
   groceryList: GroceryItem[];
   addGroceryItem: (name: string, section?: string) => void;
   toggleGroceryItem: (id: number) => void;
+  renameGroceryItem: (id: number, name: string) => void;
+  removeGroceryItem: (id: number) => void;
   clearCompletedGroceries: () => void;
   addFromRecipe: (recipe: Recipe) => number;
 }
@@ -13,11 +16,11 @@ interface GroceryContextType {
 const GroceryContext = createContext<GroceryContextType | undefined>(undefined);
 
 export const GroceryProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
-  const [groceryList, setGroceryList] = useState<GroceryItem[]>([
-      { id: 1, name: 'Milk', completed: false, section: 'Dairy' },
-      { id: 2, name: 'Bread', completed: true, section: 'Bakery' },
-      { id: 3, name: 'Apples', completed: false, section: 'Produce' },
-  ]);
+  const { state, setField } = usePersistentState();
+  const groceryList = state.groceryList;
+  const setGroceryList = useCallback((updater: React.SetStateAction<GroceryItem[]>) => {
+    setField('groceryList', updater);
+  }, [setField]);
 
   const addGroceryItem = useCallback((name: string, section: string = 'Other') => {
       if (name.trim() === '') return;
@@ -40,6 +43,19 @@ export const GroceryProvider: React.FC<{ children: React.ReactNode }> = ({ child
         return prev.map(i => i.id === id ? { ...i, completed: !i.completed } : i)
     });
   }, []);
+
+  const renameGroceryItem = useCallback((id: number, name: string) => {
+    const trimmedName = name.trim();
+    if (!trimmedName) return;
+    setGroceryList(prev => prev.map(item => item.id === id
+      ? { ...item, name: trimmedName.charAt(0).toUpperCase() + trimmedName.slice(1) }
+      : item));
+  }, [setGroceryList]);
+
+  const removeGroceryItem = useCallback((id: number) => {
+    playSound('delete');
+    setGroceryList(prev => prev.filter(item => item.id !== id));
+  }, [setGroceryList]);
 
   const clearCompletedGroceries = useCallback(() => {
     playSound('delete');
@@ -76,6 +92,8 @@ export const GroceryProvider: React.FC<{ children: React.ReactNode }> = ({ child
         groceryList, 
         addGroceryItem, 
         toggleGroceryItem, 
+        renameGroceryItem,
+        removeGroceryItem,
         clearCompletedGroceries,
         addFromRecipe 
     }}>

@@ -2,6 +2,7 @@ import React, { createContext, useContext, useState, useCallback, useMemo, useEf
 import { CalendarEvent, WeatherData, CalendarSource, Recipe } from '../types';
 import { playSound } from '../services/soundService';
 import { getWeatherForecast } from '../services/weatherService'; // We will create this
+import { usePersistentState } from './PersistentStateContext';
 
 interface CalendarContextType {
   events: CalendarEvent[];
@@ -18,40 +19,38 @@ interface CalendarContextType {
 
 const CalendarContext = createContext<CalendarContextType | undefined>(undefined);
 
-const DINNER_PLAN_CACHE_KEY = 'hearth_dinner_plan_cache';
-const LOCAL_EVENTS_CACHE_KEY = 'hearth_local_events_cache';
+const getEventMinutes = (time: string): number => {
+  if (time.toLowerCase() === 'all day') return -1;
+
+  const match = /^(\d{1,2}):(\d{2})\s*(am|pm)$/i.exec(time.trim());
+  if (!match) return Number.MAX_SAFE_INTEGER;
+
+  const hours = Number(match[1]) % 12 + (match[3].toLowerCase() === 'pm' ? 12 : 0);
+  return hours * 60 + Number(match[2]);
+};
+
+const compareCalendarEvents = (left: CalendarEvent, right: CalendarEvent): number => {
+  const timeDifference = getEventMinutes(left.time) - getEventMinutes(right.time);
+  if (timeDifference !== 0) return timeDifference;
+
+  const titleDifference = left.title.localeCompare(right.title);
+  if (titleDifference !== 0) return titleDifference;
+
+  return String(left.id).localeCompare(String(right.id));
+};
 
 export const CalendarProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
-  const [events, setEvents] = useState<CalendarEvent[]>(() => {
-      try {
-          const cached = localStorage.getItem(LOCAL_EVENTS_CACHE_KEY);
-          if (cached) return JSON.parse(cached);
-      } catch (e) {
-          console.error("Failed to load local events cache", e);
-      }
-      return [];
-  });
+  const { state, setField } = usePersistentState();
+  const [events, setEvents] = useState<CalendarEvent[]>(state.familyEvents);
   
   const [weatherData, setWeatherData] = useState<WeatherData[]>([]);
   
-  const [dinnerPlan, setDinnerPlan] = useState<Record<string, Recipe>>(() => {
-      try {
-          const cached = localStorage.getItem(DINNER_PLAN_CACHE_KEY);
-          if (cached) return JSON.parse(cached);
-      } catch (e) {
-          console.error("Failed to load dinner plan cache", e);
-      }
-      return {};
-  });
+  const dinnerPlan = state.dinnerPlan;
 
   useEffect(() => {
       const localEvents = events.filter(e => e.source === 'family');
-      localStorage.setItem(LOCAL_EVENTS_CACHE_KEY, JSON.stringify(localEvents));
-  }, [events]);
-
-  useEffect(() => {
-      localStorage.setItem(DINNER_PLAN_CACHE_KEY, JSON.stringify(dinnerPlan));
-  }, [dinnerPlan]);
+      setField('familyEvents', localEvents);
+  }, [events, setField]);
 
   useEffect(() => {
     const fetchWeather = async () => {
@@ -87,7 +86,7 @@ export const CalendarProvider: React.FC<{ children: React.ReactNode }> = ({ chil
   }, []);
 
   const setDinnerForDay = useCallback((dateKey: string, dinner: Recipe | null) => {
-    setDinnerPlan(prev => {
+    setField('dinnerPlan', prev => {
         const updated = { ...prev };
         if (dinner) {
             updated[dateKey] = dinner;
@@ -96,25 +95,33 @@ export const CalendarProvider: React.FC<{ children: React.ReactNode }> = ({ chil
         }
         return updated;
     });
-  }, []);
+  }, [setField]);
 
   const eventsByDate = useMemo(() => {
-    return events.reduce((acc, event) => {
+    const groupedEvents = events.reduce((acc, event) => {
         const dayKey = event.date;
         if (!acc[dayKey]) acc[dayKey] = [];
         acc[dayKey].push(event);
         return acc;
     }, {} as Record<string, CalendarEvent[]>);
+
+    Object.values(groupedEvents).forEach(dayEvents => dayEvents.sort(compareCalendarEvents));
+    return groupedEvents;
   }, [events]);
 
   const eventsBySourceAndDate = useMemo(() => {
-    return events.reduce((acc, event) => {
+    const groupedEvents = events.reduce((acc, event) => {
       if (!acc[event.source]) acc[event.source] = {};
       const dayKey = event.date;
       if (!acc[event.source][dayKey]) acc[event.source][dayKey] = [];
       acc[event.source][dayKey].push(event);
       return acc;
     }, { family: {}, google: {} } as Record<CalendarSource, Record<string, CalendarEvent[]>>);
+
+    Object.values(groupedEvents).forEach(sourceEvents => {
+      Object.values(sourceEvents).forEach(dayEvents => dayEvents.sort(compareCalendarEvents));
+    });
+    return groupedEvents;
   }, [events]);
 
   return (

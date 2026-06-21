@@ -6,6 +6,7 @@ import { CalendarPlusIcon, MapPinIcon, ClockIcon, SearchIcon } from './icons';
 import { useToast } from './Toast';
 import { EventDetailModal } from './EventDetailModal';
 import { MicInputButton } from './MicInputButton';
+import { usePersistentState } from '../contexts/PersistentStateContext';
 
 export const LocalEvents: React.FC<{
   onAddCalendarEvent: (title: string, date: string, time: string) => void;
@@ -13,9 +14,11 @@ export const LocalEvents: React.FC<{
   const [events, setEvents] = useState<LocalEvent[]>([]);
   const [loading, setLoading] = useState(true);
   const [selectedEvent, setSelectedEvent] = useState<LocalEvent | null>(null);
+  const { state: persistentState, setField } = usePersistentState();
   
   // Location States
-  const [location, setLocation] = useState<string>(() => localStorage.getItem('hearth_user_location') || '');
+  const location = persistentState.location;
+  const setLocation = (value: string) => setField('location', value);
   const [isEditingLocation, setIsEditingLocation] = useState(false);
   const [tempLocation, setTempLocation] = useState('');
   
@@ -46,7 +49,6 @@ export const LocalEvents: React.FC<{
               if (ipData.city && ipData.region) {
                   const locString = `${ipData.city}, ${ipData.region}`;
                   setLocation(locString);
-                  localStorage.setItem('hearth_user_location', locString);
                   loadEventsForLocation(locString);
               } else {
                   throw new Error("Invalid IP geo data");
@@ -65,7 +67,6 @@ export const LocalEvents: React.FC<{
   const handleSaveLocation = () => {
       if (!tempLocation.trim()) return;
       setLocation(tempLocation);
-      localStorage.setItem('hearth_user_location', tempLocation);
       setIsEditingLocation(false);
       loadEventsForLocation(tempLocation);
   };
@@ -117,7 +118,6 @@ export const LocalEvents: React.FC<{
                                 const cleanText = text.replace(/[.,!?]+$/, '').trim();
                                 setTempLocation(cleanText);
                                 setLocation(cleanText);
-                                localStorage.setItem('hearth_user_location', cleanText);
                                 setIsEditingLocation(false);
                                 loadEventsForLocation(cleanText);
                             }}

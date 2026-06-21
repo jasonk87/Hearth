@@ -1,26 +1,17 @@
-
-import React, { useState, useRef, useEffect, useCallback } from 'react';
-import { Modality, Session, LiveServerMessage, GenerateContentResponse } from '@google/genai';
-import { 
-    ai, createBlob, 
-    launchAppFunctionDeclaration,
-    addGroceryItemFunctionDeclaration,
-    completeGroceryItemFunctionDeclaration, clearCompletedGroceriesFunctionDeclaration,
-    addCalendarEventFunctionDeclaration,
-    editCalendarEventFunctionDeclaration, deleteCalendarEventFunctionDeclaration,
-    addNoteFunctionDeclaration, deleteNoteFunctionDeclaration,
-    setDinnerPlanFunctionDeclaration,
-    startStoryFunctionDeclaration,
-} from '../services/geminiService';
-import { MicIcon } from './icons';
-import type { CalendarEvent, GroceryItem, CalendarSource, Note } from '../types';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
+import { ai, transcribeAudio } from '../services/geminiService';
+import { interpretVoiceCommand, resolveSpokenDate, VoiceCommand } from '../services/voiceCommandService';
+import { MicIcon, RefreshCwIcon } from './icons';
+import type { CalendarEvent, CalendarSource, Game, GroceryItem, Note, NoteColor } from '../types';
 import type { ModalType } from '../App';
 import { useToast } from './Toast';
 
 interface VoiceAssistantProps {
   notes: Note[];
   onAddNote: (text: string) => void;
+  onUpdateNote: (id: number, text: string) => void;
   onDeleteNote: (id: number) => void;
+  onChangeNoteColor: (id: number, color: NoteColor) => void;
   eventsBySource: Record<CalendarSource, Record<string, CalendarEvent[]>>;
   onAddCalendarEvent: (title: string, date: string, time: string) => void;
   onDeleteCalendarEvent: (eventId: number | string) => void;
@@ -28,463 +19,331 @@ interface VoiceAssistantProps {
   groceryList: GroceryItem[];
   onAddGroceryItem: (name: string, section: string) => void;
   onToggleGroceryItem: (id: number) => void;
+  onRenameGroceryItem: (id: number, name: string) => void;
+  onRemoveGroceryItem: (id: number) => void;
   onClearCompletedGroceries: () => void;
   setActiveModal: (modal: ModalType | null) => void;
-  onSetDinnerForDay: (dateKey: string, dinner: string) => void;
+  onLaunchGame: (game: Game) => void;
+  onCloseCurrent: () => void;
+  onSetDinnerForDay: (dateKey: string, mealName: string) => void;
+  onRemoveDinnerForDay: (dateKey: string) => void;
+  onSearchRecipes: (query: string) => void;
   onGeneralQuery: (userQuery: string, modelResponse: string) => void;
   onStartStory: (prompt: string) => Promise<void>;
 }
 
-const dayNameToIndex = (dayName: string): number => {
-    const lowerDayName = dayName.toLowerCase();
-    const today = new Date();
-    today.setHours(0, 0, 0, 0);
-    
-    if (lowerDayName === 'today') return 0;
-    if (lowerDayName === 'tomorrow') return 1;
+const blobToBase64 = (blob: Blob): Promise<string> => new Promise((resolve, reject) => {
+  const reader = new FileReader();
+  reader.onloadend = () => typeof reader.result === 'string'
+    ? resolve(reader.result.split(',')[1])
+    : reject(new Error('Unable to encode microphone audio.'));
+  reader.onerror = reject;
+  reader.readAsDataURL(blob);
+});
 
-    const days = ['sunday', 'monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday'];
-    const targetDayIndex = days.indexOf(lowerDayName);
-    if (targetDayIndex === -1) return -1;
+const normalize = (value: string) => value.toLowerCase().trim();
 
-    const todayDayIndex = today.getDay();
-    const diff = targetDayIndex - todayDayIndex;
-    return diff >= 0 ? diff : diff + 7;
+const findByPhrase = <T,>(items: T[], phrase: string | undefined, getText: (item: T) => string): T | undefined => {
+  if (!phrase) return undefined;
+  const search = normalize(phrase);
+  return items.find(item => {
+    const text = normalize(getText(item));
+    return text.includes(search) || search.includes(text);
+  });
 };
 
-const findEventByDetails = (eventsBySource: Record<CalendarSource, Record<string, CalendarEvent[]>>, dayIndex: number | string, title: string, time?: string): CalendarEvent | null => {
-    let dayKey: string;
-    
-    if (typeof dayIndex === 'string') {
-        dayKey = dayIndex;
-    } else {
-        const today = new Date();
-        const targetDate = new Date(today);
-        targetDate.setDate(today.getDate() + dayIndex);
-        dayKey = targetDate.toISOString().split('T')[0];
-    }
+const inferGrocerySection = (itemName: string): string => {
+  const item = normalize(itemName);
+  if (/milk|cheese|yogurt|cream|butter|egg/.test(item)) return 'Dairy';
+  if (/apple|banana|orange|lettuce|tomato|onion|potato|fruit|vegetable/.test(item)) return 'Produce';
+  if (/bread|bagel|bun|roll|tortilla/.test(item)) return 'Bakery';
+  if (/chicken|beef|pork|fish|turkey|meat/.test(item)) return 'Meat';
+  if (/frozen|ice cream/.test(item)) return 'Frozen';
+  if (/water|juice|soda|coffee|tea/.test(item)) return 'Drinks';
+  if (/soap|paper|cleaner|detergent|trash bag/.test(item)) return 'Household';
+  return 'Other';
+};
 
-    const lowerTitle = title.toLowerCase();
+const navigationTargets: Record<string, ModalType | null> = {
+  home: null,
+  calendar: null,
+  notes: 'notes',
+  note: 'notes',
+  grocery: 'grocery',
+  groceries: 'grocery',
+  'grocery list': 'grocery',
+  'shopping list': 'grocery',
+  recipes: 'recipes',
+  recipe: 'recipes',
+  'meal plan': 'mealPlanner',
+  'meal planner': 'mealPlanner',
+  meals: 'mealPlanner',
+  events: 'events',
+  'local events': 'events',
+  games: 'games',
+};
 
-    for (const source of Object.keys(eventsBySource) as CalendarSource[]) {
-        const dayEvents = eventsBySource[source][dayKey];
-        if (dayEvents) {
-            const foundEvent = dayEvents.find(event => {
-                const eventTitle = event.title.toLowerCase();
-                const titleMatch = eventTitle.includes(lowerTitle) || lowerTitle.includes(eventTitle);
-                const timeMatch = !time || event.time === time;
-                return titleMatch && timeMatch;
-            });
-            if (foundEvent) return foundEvent;
-        }
-    }
-    return null;
-}
+const gameTargets: Record<string, Game> = {
+  'tic tac toe': 'tictactoe',
+  tictactoe: 'tictactoe',
+  hangman: 'hangman',
+  memory: 'memory',
+  'memory match': 'memory',
+  snake: 'snake',
+  '2048': '2048',
+  storyboard: 'storyboard',
+  story: 'storyboard',
+};
 
 export const VoiceAssistant: React.FC<VoiceAssistantProps> = (props) => {
   const [isListening, setIsListening] = useState(false);
-  const isListeningRef = useRef(false);
+  const [isProcessing, setIsProcessing] = useState(false);
+  const [transcript, setTranscript] = useState('');
+  const [feedback, setFeedback] = useState('');
+  const recorderRef = useRef<MediaRecorder | null>(null);
+  const streamRef = useRef<MediaStream | null>(null);
+  const chunksRef = useRef<Blob[]>([]);
+  const recordingTimeoutRef = useRef<number | null>(null);
   const { showToast } = useToast();
-  const sessionPromiseRef = useRef<Promise<Session> | null>(null);
-  const mediaStreamRef = useRef<MediaStream | null>(null);
-  const audioContextRef = useRef<AudioContext | null>(null);
-  const scriptProcessorRef = useRef<ScriptProcessorNode | null>(null);
-  const mediaStreamSourceRef = useRef<MediaStreamAudioSourceNode | null>(null);
-  
-  // Refs for transcription handling
-  const userInputRef = useRef('');
-  const toolCallMadeInTurn = useRef(false);
-  const processedToolCallIds = useRef(new Set<string>());
 
+  const finish = useCallback((message: string, type: 'success' | 'error' = 'success') => {
+    setFeedback(message);
+    showToast(message, type);
+  }, [showToast]);
 
-  const stopListening = useCallback(async () => {
-    if (sessionPromiseRef.current) {
+  const allEvents = Object.values(props.eventsBySource).flatMap(byDate => Object.values(byDate).flat());
+
+  const executeCommand = useCallback(async (command: VoiceCommand, originalTranscript: string) => {
+    switch (command.action) {
+      case 'navigate': {
+        const target = navigationTargets[normalize(command.target || '')];
+        if (target === undefined && normalize(command.target || '') !== 'home' && normalize(command.target || '') !== 'calendar') {
+          finish(`I couldn't find ${command.target || 'that app'}.`, 'error');
+          return;
+        }
+        props.setActiveModal(target);
+        finish(target ? `Opening ${command.target}.` : 'Opening the calendar.');
+        return;
+      }
+      case 'close':
+        props.onCloseCurrent();
+        finish('Closed.');
+        return;
+      case 'launch_game': {
+        const game = gameTargets[normalize(command.game || command.target || '')];
+        if (!game) return finish(`I couldn't find that game.`, 'error');
+        props.onLaunchGame(game);
+        finish(`Starting ${command.game || command.target}.`);
+        return;
+      }
+      case 'add_note':
+        if (!command.text) return finish('Tell me what the note should say.', 'error');
+        props.onAddNote(command.text);
+        finish('Note added.');
+        return;
+      case 'update_note': {
+        const note = findByPhrase(props.notes, command.match, item => item.text);
+        if (!note || !command.replacement) return finish(`I couldn't find that note or its replacement text.`, 'error');
+        props.onUpdateNote(note.id, command.replacement);
+        finish('Note updated.');
+        return;
+      }
+      case 'delete_note': {
+        const note = findByPhrase(props.notes, command.match || command.text, item => item.text);
+        if (!note) return finish(`I couldn't find that note.`, 'error');
+        props.onDeleteNote(note.id);
+        finish('Note deleted.');
+        return;
+      }
+      case 'change_note_color': {
+        const note = findByPhrase(props.notes, command.match, item => item.text);
+        const color = normalize(command.color || '') as NoteColor;
+        if (!note || !['yellow', 'pink', 'blue', 'green'].includes(color)) return finish(`I couldn't update that note color.`, 'error');
+        props.onChangeNoteColor(note.id, color);
+        finish(`Note changed to ${color}.`);
+        return;
+      }
+      case 'add_grocery':
+        if (!command.text) return finish('Tell me which grocery item to add.', 'error');
+        props.onAddGroceryItem(command.text, command.section || inferGrocerySection(command.text));
+        finish(`${command.text} added to groceries.`);
+        return;
+      case 'complete_grocery': {
+        const item = findByPhrase(props.groceryList.filter(grocery => !grocery.completed), command.match || command.text, grocery => grocery.name);
+        if (!item) return finish(`I couldn't find that unfinished grocery item.`, 'error');
+        props.onToggleGroceryItem(item.id);
+        finish(`${item.name} checked off.`);
+        return;
+      }
+      case 'rename_grocery': {
+        const item = findByPhrase(props.groceryList, command.match, grocery => grocery.name);
+        if (!item || !command.replacement) return finish(`I couldn't rename that grocery item.`, 'error');
+        props.onRenameGroceryItem(item.id, command.replacement);
+        finish(`Renamed ${item.name} to ${command.replacement}.`);
+        return;
+      }
+      case 'remove_grocery': {
+        const item = findByPhrase(props.groceryList, command.match || command.text, grocery => grocery.name);
+        if (!item) return finish(`I couldn't find that grocery item.`, 'error');
+        props.onRemoveGroceryItem(item.id);
+        finish(`${item.name} removed.`);
+        return;
+      }
+      case 'clear_completed_groceries':
+        props.onClearCompletedGroceries();
+        finish('Completed grocery items cleared.');
+        return;
+      case 'add_event': {
+        const date = resolveSpokenDate(command.day, command.date);
+        if (!date || !command.title || !command.time) return finish('I need the event title, day, and time.', 'error');
+        props.onAddCalendarEvent(command.title, date, command.time);
+        finish(`${command.title} added to the calendar.`);
+        return;
+      }
+      case 'edit_event': {
+        const date = resolveSpokenDate(command.day, command.date);
+        const event = findByPhrase(allEvents.filter(item => !date || item.date === date), command.match || command.title, item => item.title);
+        if (!event || event.source === 'google') return finish(`I couldn't edit that family calendar event.`, 'error');
+        props.onEditCalendarEvent({ ...event, title: command.newTitle || event.title, time: command.newTime || event.time });
+        finish(`${event.title} updated.`);
+        return;
+      }
+      case 'delete_event': {
+        const date = resolveSpokenDate(command.day, command.date);
+        const event = findByPhrase(allEvents.filter(item => !date || item.date === date), command.match || command.title, item => item.title);
+        if (!event || event.source === 'google') return finish(`I couldn't remove that family calendar event.`, 'error');
+        props.onDeleteCalendarEvent(event.id);
+        finish(`${event.title} removed from the calendar.`);
+        return;
+      }
+      case 'set_dinner': {
+        const date = resolveSpokenDate(command.day, command.date);
+        if (!date || !command.mealName) return finish('Tell me the meal and day for dinner.', 'error');
+        props.onSetDinnerForDay(date, command.mealName);
+        finish(`${command.mealName} set for dinner.`);
+        return;
+      }
+      case 'remove_dinner': {
+        const date = resolveSpokenDate(command.day, command.date);
+        if (!date) return finish('Tell me which dinner day to clear.', 'error');
+        props.onRemoveDinnerForDay(date);
+        finish('Dinner plan removed.');
+        return;
+      }
+      case 'search_recipes':
+        if (!command.query) return finish('Tell me what kind of recipe to find.', 'error');
+        props.setActiveModal('recipes');
+        props.onSearchRecipes(command.query);
+        finish(`Searching recipes for ${command.query}.`);
+        return;
+      case 'start_story':
+        if (!command.query) return finish('Tell me what the story should be about.', 'error');
+        props.onLaunchGame('storyboard');
+        await props.onStartStory(command.query);
+        finish('Your story has started.');
+        return;
+      case 'general_query': {
+        const query = command.query || originalTranscript;
         try {
-            const session = await sessionPromiseRef.current;
-            session.close();
-        } catch (e) { console.error("Error closing session:", e); }
-        sessionPromiseRef.current = null;
+          const response = await ai.models.generateContent({ model: 'gemini-2.5-flash-lite', contents: query });
+          props.onGeneralQuery(query, response.text);
+          finish('I opened the answer for you.');
+        } catch (error) {
+          console.error('Voice general query failed:', error);
+          finish(`I couldn't answer that right now.`, 'error');
+        }
+      }
     }
-    if (mediaStreamRef.current) {
-        mediaStreamRef.current.getTracks().forEach(track => track.stop());
-        mediaStreamRef.current = null;
-    }
-    if (scriptProcessorRef.current) {
-        scriptProcessorRef.current.onaudioprocess = null;
-        scriptProcessorRef.current.disconnect();
-        scriptProcessorRef.current = null;
-    }
-    if (mediaStreamSourceRef.current) {
-        mediaStreamSourceRef.current.disconnect();
-        mediaStreamSourceRef.current = null;
-    }
-    if (audioContextRef.current && audioContextRef.current.state !== 'closed') {
-        audioContextRef.current.close().catch(e => console.error("Error closing audio context:", e));
-        audioContextRef.current = null;
-    }
-    isListeningRef.current = false;
-    setIsListening(false);
+  }, [allEvents, finish, props]);
+
+  const stopRecording = useCallback(() => {
+    if (recordingTimeoutRef.current) window.clearTimeout(recordingTimeoutRef.current);
+    if (recorderRef.current?.state === 'recording') recorderRef.current.stop();
   }, []);
 
-  const handleToolCall = useCallback(async (functionName: string, args: any): Promise<string> => {
-    console.log("Tool call:", functionName, args);
-    let message = '';
-    let messageType: 'success' | 'error' = 'success';
-    
-    switch (functionName) {
-        case 'launchApp': {
-            const appName = args.appName.toLowerCase();
-            if (['calendar', 'games', 'notes', 'grocery', 'storyboard'].includes(appName)) {
-                props.setActiveModal(appName as ModalType);
-                message = `Opening the ${appName} app.`;
-            } else {
-                message = `Sorry, I can't find an app named ${appName}.`;
-                messageType = 'error';
-            }
-            break;
-        }
-        case 'startStory': {
-            props.setActiveModal('storyboard');
-            await props.onStartStory(args.prompt);
-            message = `Okay, let's create a story about ${args.prompt}!`;
-            break;
-        }
-        case 'setDinnerPlan': {
-            let dateKey = args.date;
-            if (!dateKey) {
-                const dayIndex = dayNameToIndex(args.day);
-                if (dayIndex >= 0) {
-                    const today = new Date();
-                    const targetDate = new Date(today);
-                    targetDate.setDate(today.getDate() + dayIndex);
-                    dateKey = targetDate.toISOString().split('T')[0];
-                }
-            }
-
-            if (dateKey) {
-                props.onSetDinnerForDay(dateKey, args.mealName);
-                message = `OK, I've set ${args.mealName} for dinner.`;
-            } else {
-                message = `Sorry, I couldn't understand which day you meant.`;
-                messageType = 'error';
-            }
-            break;
-        }
-        case 'addNote': {
-            props.onAddNote(args.noteText);
-            message = `Added new note.`;
-            break;
-        }
-        case 'deleteNote': {
-            const noteTextToFind = args.noteText.toLowerCase();
-            const noteToDelete = props.notes.find(n => n.text.toLowerCase().includes(noteTextToFind));
-            if (noteToDelete) {
-                props.onDeleteNote(noteToDelete.id);
-                message = `Deleted note about "${args.noteText}".`;
-            } else {
-                message = `I couldn't find a note matching "${args.noteText}".`;
-                messageType = 'error';
-            }
-            break;
-        }
-        case 'addGroceryItem': {
-            const { itemName } = args;
-            try {
-                const response: GenerateContentResponse = await ai.models.generateContent({
-                    model: 'gemini-2.5-flash-lite',
-                    contents: `Categorize the grocery item "${itemName}" into one of these exact categories: Produce, Dairy, Meat, Bakery, Pantry, Frozen, Drinks, Household, Other.`,
-                    config: {
-                        thinkingConfig: {
-                            thinkingBudget: 24576,
-                        }
-                    }
-                });
-                const section = response.text.trim();
-                props.onAddGroceryItem(itemName, section);
-                message = `Added ${itemName} to your list.`;
-            } catch (e) {
-                console.error("Error categorizing item:", e);
-                props.onAddGroceryItem(itemName, 'Other');
-                message = `Added ${itemName}, but couldn't categorize it.`;
-            }
-            break;
-        }
-        case 'completeGroceryItem': {
-            const itemName = args.itemName.toLowerCase();
-            const itemToComplete = props.groceryList.find(item => item.name.toLowerCase().includes(itemName) && !item.completed);
-            if (itemToComplete) {
-                props.onToggleGroceryItem(itemToComplete.id);
-                message = `Checked off ${itemToComplete.name}.`;
-            } else {
-                message = `I couldn't find "${args.itemName}" on your list.`;
-                messageType = 'error';
-            }
-            break;
-        }
-        case 'clearCompletedGroceries': {
-            props.onClearCompletedGroceries();
-            message = `Cleared the completed items from your list.`;
-            break;
-        }
-        case 'addCalendarEvent': {
-            let dateKey = args.date;
-            if (!dateKey) {
-                const dayIndex = dayNameToIndex(args.day);
-                if (dayIndex >= 0 && dayIndex < 7) {
-                    const today = new Date();
-                    const targetDate = new Date(today);
-                    targetDate.setDate(today.getDate() + dayIndex);
-                    dateKey = targetDate.toISOString().split('T')[0];
-                }
-            }
-
-            if (dateKey) {
-                props.onAddCalendarEvent(args.title, dateKey, args.time);
-                message = `Added "${args.title}".`;
-            } else {
-                message = `Sorry, I couldn't add that event. Please specify a valid day.`;
-                messageType = 'error';
-            }
-            break;
-        }
-        case 'deleteCalendarEvent': {
-            let searchKey: string | number = args.date;
-            if (!searchKey) {
-                const dayIndex = dayNameToIndex(args.day);
-                if (dayIndex >= 0) {
-                    searchKey = dayIndex;
-                }
-            }
-
-            if (searchKey === undefined) {
-                 message = `Sorry, I couldn't understand which day you meant.`;
-                 messageType = 'error';
-                 break;
-            }
-            const eventToDelete = findEventByDetails(props.eventsBySource, searchKey, args.title, args.time);
-            if(eventToDelete) {
-                props.onDeleteCalendarEvent(eventToDelete.id);
-                message = `Removed "${eventToDelete.title}" from the calendar.`;
-            } else {
-                message = `Sorry, I couldn't find "${args.title}".`;
-                messageType = 'error';
-            }
-            break;
-        }
-        case 'editCalendarEvent': {
-            let searchKey: string | number = args.date;
-            if (!searchKey) {
-                const dayIndex = dayNameToIndex(args.day);
-                if (dayIndex >= 0) {
-                    searchKey = dayIndex;
-                }
-            }
-
-            if (searchKey === undefined) {
-                message = `Sorry, I couldn't understand which day you meant.`;
-                messageType = 'error';
-                break;
-            }
-
-            const eventToEdit = findEventByDetails(props.eventsBySource, searchKey, args.originalTitle);
-            if (!eventToEdit) {
-                message = `I couldn't find "${args.originalTitle}".`;
-                messageType = 'error';
-                break;
-            }
-            
-            const updatedEvent = { ...eventToEdit };
-            const updates = [];
-
-            if (args.newTitle) { updatedEvent.title = args.newTitle; updates.push('title'); }
-            if (args.newTime) { updatedEvent.time = args.newTime; updates.push('time'); }
-            if (args.participantToAdd) {
-                updatedEvent.participants = [...(updatedEvent.participants || []), args.participantToAdd];
-                updates.push('participants');
-            }
-            
-            if(updates.length > 0) {
-                props.onEditCalendarEvent(updatedEvent);
-                message = `Updated ${updates.join(', ')} for "${args.originalTitle}".`;
-            } else {
-                message = `No changes specified for the event.`;
-                messageType = 'error';
-            }
-            break;
-        }
-        default:
-            message = "I'm sorry, I can't do that.";
-            messageType = 'error';
-            break;
+  const startRecording = useCallback(async () => {
+    if (!navigator.mediaDevices?.getUserMedia || !window.MediaRecorder) {
+      finish('This browser does not support microphone recording.', 'error');
+      return;
     }
-
-    if (message) {
-        showToast(message, messageType);
-    }
-    return message || 'OK';
-  }, [props, showToast]);
-
-  const startListening = useCallback(async () => {
-    isListeningRef.current = true;
-    setIsListening(true);
-
-    const handleAskAi = async (query: string) => {
-        try {
-            const response = await ai.models.generateContent({
-                model: 'gemini-2.5-flash-lite',
-                contents: query,
-                config: {
-                    thinkingConfig: {
-                        thinkingBudget: 24576,
-                    }
-                }
-            });
-            props.onGeneralQuery(query, response.text);
-        } catch (e) {
-            console.error("Error in general query:", e);
-            showToast("Sorry, I couldn't answer that question.", 'error');
-        }
-    };
 
     try {
-        const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-        
-        if (!isListeningRef.current) {
-            // User cancelled before media device stream could initialize
-            stream.getTracks().forEach(track => track.stop());
-            return;
-        }
+      setTranscript('');
+      setFeedback('');
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      const recorder = new MediaRecorder(stream);
+      streamRef.current = stream;
+      recorderRef.current = recorder;
+      chunksRef.current = [];
 
-        mediaStreamRef.current = stream;
-        
-        audioContextRef.current = new (window.AudioContext || (window as any).webkitAudioContext)({ sampleRate: 16000 });
-        
-        const allTools = [
-            launchAppFunctionDeclaration,
-            addNoteFunctionDeclaration,
-            deleteNoteFunctionDeclaration,
-            addGroceryItemFunctionDeclaration,
-            completeGroceryItemFunctionDeclaration,
-            clearCompletedGroceriesFunctionDeclaration, addCalendarEventFunctionDeclaration,
-            editCalendarEventFunctionDeclaration, deleteCalendarEventFunctionDeclaration,
-            setDinnerPlanFunctionDeclaration,
-            startStoryFunctionDeclaration,
-        ];
-
-        const systemInstruction = `You are a helpful kitchen assistant for a family. All actions should be for the shared family context. If a function is called, provide only the tool response, no additional conversational text. If no function is called, provide a conversational text response.`;
-
-        sessionPromiseRef.current = ai.live.connect({
-            model: 'gemini-2.5-flash-native-audio-preview-09-2025',
-            config: {
-                responseModalities: [Modality.AUDIO],
-                speechConfig: { voiceConfig: { prebuiltVoiceConfig: { voiceName: 'Zephyr' } } },
-                systemInstruction: systemInstruction,
-                tools: [{ functionDeclarations: allTools }],
-                inputAudioTranscription: {},
-            },
-            callbacks: {
-                onopen: () => {
-                    userInputRef.current = '';
-                    toolCallMadeInTurn.current = false;
-                    processedToolCallIds.current.clear();
-
-                    const source = audioContextRef.current!.createMediaStreamSource(stream);
-                    mediaStreamSourceRef.current = source;
-                    const scriptProcessor = audioContextRef.current!.createScriptProcessor(4096, 1, 1);
-                    scriptProcessorRef.current = scriptProcessor;
-
-                    scriptProcessor.onaudioprocess = (audioProcessingEvent) => {
-                        const inputData = audioProcessingEvent.inputBuffer.getChannelData(0);
-                        const pcmBlob = createBlob(inputData);
-                        sessionPromiseRef.current?.then((session) => {
-                           session.sendRealtimeInput({ media: pcmBlob });
-                        });
-                    };
-                    source.connect(scriptProcessor);
-                    scriptProcessor.connect(audioContextRef.current!.destination);
-                },
-                onmessage: async (message: LiveServerMessage) => {
-                    if (message.serverContent?.inputTranscription) {
-                        userInputRef.current += message.serverContent.inputTranscription.text;
-                    }
-                    
-                    if (message.toolCall?.functionCalls) {
-                        toolCallMadeInTurn.current = true;
-                        const session = await sessionPromiseRef.current;
-                        if (!session) return;
-
-                        // Process tool calls sequentially to ensure proper awaiting
-                        for (const fc of message.toolCall.functionCalls) {
-                           if (!processedToolCallIds.current.has(fc.id)) {
-                               processedToolCallIds.current.add(fc.id);
-                               const result = await handleToolCall(fc.name, fc.args);
-                               session.sendToolResponse({
-                                    functionResponses: {
-                                        id : fc.id,
-                                        name: fc.name,
-                                        response: { result: result },
-                                    }
-                               });
-                           }
-                        }
-                    }
-                    
-                    if (message.serverContent?.turnComplete) {
-                        // Capture the current input before it gets reset or overwritten
-                        const finalInput = userInputRef.current;
-                        if (!toolCallMadeInTurn.current && finalInput) {
-                            handleAskAi(finalInput);
-                        }
-                        stopListening();
-                    }
-                },
-                onerror: (e: ErrorEvent) => {
-                    console.error('Gemini Live API Error:', e);
-                    showToast('Voice assistant error.', 'error');
-                    stopListening();
-                },
-                onclose: () => {},
-            },
-        });
-    } catch (error) {
-        console.error('Error starting voice assistant:', error);
-        showToast('Could not start microphone.', 'error');
-        isListeningRef.current = false;
+      recorder.ondataavailable = event => {
+        if (event.data.size > 0) chunksRef.current.push(event.data);
+      };
+      recorder.onstop = async () => {
         setIsListening(false);
-    }
-  }, [stopListening, handleToolCall, showToast, props.onGeneralQuery]);
+        setIsProcessing(true);
+        stream.getTracks().forEach(track => track.stop());
+        streamRef.current = null;
 
-  const toggleListening = () => {
-    if (isListeningRef.current) {
-      stopListening();
-    } else {
-      startListening();
-    }
-  };
+        try {
+          const audio = new Blob(chunksRef.current, { type: recorder.mimeType || 'audio/webm' });
+          if (audio.size === 0) throw new Error('No microphone audio was captured.');
+          const text = await transcribeAudio(await blobToBase64(audio), audio.type);
+          if (!text.trim()) throw new Error('No speech was recognized.');
+          setTranscript(text);
+          await executeCommand(await interpretVoiceCommand(text), text);
+        } catch (error) {
+          console.error('Voice command failed:', error);
+          finish(error instanceof Error ? error.message : 'Voice command failed.', 'error');
+        } finally {
+          setIsProcessing(false);
+          recorderRef.current = null;
+        }
+      };
 
-  useEffect(() => {
-    return () => {
-      stopListening();
-    };
-  }, [stopListening]);
+      recorder.start();
+      setIsListening(true);
+      recordingTimeoutRef.current = window.setTimeout(stopRecording, 20_000);
+    } catch (error) {
+      console.error('Unable to start microphone:', error);
+      finish('Microphone access was unavailable. Check the browser permission and try again.', 'error');
+    }
+  }, [executeCommand, finish, stopRecording]);
+
+  useEffect(() => () => {
+    if (recordingTimeoutRef.current) window.clearTimeout(recordingTimeoutRef.current);
+    if (recorderRef.current?.state === 'recording') recorderRef.current.stop();
+    streamRef.current?.getTracks().forEach(track => track.stop());
+  }, []);
+
+  const toggleRecording = () => isListening ? stopRecording() : void startRecording();
 
   return (
     <>
       <button
-        onClick={toggleListening}
-        className={`fixed bottom-6 right-6 sm:bottom-8 sm:right-8 w-16 h-16 sm:w-20 sm:h-20 rounded-full flex items-center justify-center text-white shadow-2xl transition-all duration-300 ${isListening ? 'bg-red-500 animate-pulse' : 'bg-teal-600 hover:bg-teal-500'}`}
-        aria-label="Toggle Voice Assistant"
+        onClick={toggleRecording}
+        disabled={isProcessing}
+        className={`fixed bottom-6 right-6 z-[55] flex h-16 w-16 items-center justify-center rounded-full text-white shadow-2xl transition-all duration-300 sm:bottom-8 sm:right-8 sm:h-20 sm:w-20 ${isListening ? 'animate-pulse bg-red-500' : 'bg-teal-600 hover:bg-teal-500'} disabled:cursor-wait disabled:opacity-70`}
+        aria-label={isListening ? 'Stop voice command' : isProcessing ? 'Processing voice command' : 'Start voice command'}
       >
-        <MicIcon className="w-8 h-8 sm:w-10 sm:h-10" />
+        {isProcessing ? <RefreshCwIcon className="h-8 w-8 animate-spin" /> : <MicIcon className="h-8 w-8 sm:h-10 sm:w-10" />}
       </button>
 
-      {isListening && (
-        <div className="fixed inset-0 bg-black/30 backdrop-blur-md z-40 flex items-center justify-center p-4" onClick={stopListening}>
-           <div className="bg-white/90 backdrop-blur-lg p-6 rounded-2xl w-full max-w-lg flex flex-col items-center gap-4 border border-slate-200/80">
-                <h3 className="text-2xl font-bold text-teal-600">Listening...</h3>
-                <MicIcon className="w-16 h-16 text-teal-500 animate-pulse" />
-                <p className="text-slate-600">Tap anywhere to stop.</p>
-           </div>
+      {(isListening || isProcessing) && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/30 p-4 backdrop-blur-md">
+          <div className="flex w-full max-w-lg flex-col items-center gap-4 rounded-2xl border border-slate-200/80 bg-white/95 p-8 text-center shadow-2xl">
+            <h3 className="text-2xl font-bold text-teal-600">{isListening ? 'Listening…' : 'Working on it…'}</h3>
+            {isProcessing ? <RefreshCwIcon className="h-14 w-14 animate-spin text-teal-500" /> : <MicIcon className="h-16 w-16 animate-pulse text-red-500" />}
+            <p className="text-lg text-slate-600">{isListening ? 'Say one command, then tap Stop.' : transcript || 'Transcribing your request…'}</p>
+            {isListening && <button onClick={stopRecording} className="min-h-12 rounded-xl bg-red-500 px-8 py-3 font-bold text-white">Stop</button>}
+          </div>
+        </div>
+      )}
+
+      {!isListening && !isProcessing && feedback && (
+        <div className="fixed bottom-28 right-6 z-40 max-w-sm rounded-xl bg-slate-900/90 px-4 py-3 text-sm text-white shadow-lg sm:bottom-32 sm:right-8">
+          {transcript && <p className="mb-1 text-slate-300">“{transcript}”</p>}
+          <p>{feedback}</p>
         </div>
       )}
     </>

@@ -31,6 +31,7 @@ import { Loader } from './components/Loader';
 import { ProactiveSuggestionBanner } from './components/ProactiveSuggestionBanner';
 import { ScheduleDinnerModal } from './components/ScheduleDinnerModal';
 import { AiChatModal } from './components/AiChatModal';
+import { PersistentStateProvider, usePersistentState } from './contexts/PersistentStateContext';
 import { HomeIcon, NotebookTextIcon, ShoppingCartIcon, ChefHatIcon, Gamepad2Icon, CalendarPlusIcon, TicketIcon } from './components/icons';
 import { MealPlannerApp } from './components/MealPlannerApp';
 import { LocalEvents } from './components/LocalEvents';
@@ -102,8 +103,9 @@ const Sidebar: React.FC<{
 const FAMILY_USER: User = { id: 'family', name: 'Family', avatar: '👨‍👩‍👧‍👦', color: 'border-green-500' };
 
 function AppContent() {
+  const { state: persistentState, setField: setPersistentField } = usePersistentState();
   const { notes, addNote, updateNote, deleteNote, changeNoteColor } = useNotes();
-  const { groceryList, addGroceryItem, toggleGroceryItem, clearCompletedGroceries, addFromRecipe } = useGroceries();
+  const { groceryList, addGroceryItem, toggleGroceryItem, renameGroceryItem, removeGroceryItem, clearCompletedGroceries, addFromRecipe } = useGroceries();
   const { events, setEvents, weatherData, dinnerPlan, addCalendarEvent, editCalendarEvent, deleteCalendarEvent, setDinnerForDay, eventsByDate, eventsBySourceAndDate } = useCalendar();
 
   const [activeInput, setActiveInput] = useState<ActiveInput>(null);
@@ -121,10 +123,10 @@ function AppContent() {
   const [initialGame, setInitialGame] = useState<Game | null>(null);
   
   // New state for daily briefing
-  const [briefingStatus, setBriefingStatus] = useState<Record<string, string>>(() => {
-      const saved = localStorage.getItem('hearth_briefing_status');
-      return saved ? JSON.parse(saved) : {};
-  });
+  const briefingStatus = persistentState.briefingStatus;
+  const setBriefingStatus = useCallback((updater: React.SetStateAction<Record<string, string>>) => {
+    setPersistentField('briefingStatus', updater);
+  }, [setPersistentField]);
   const [briefingData, setBriefingData] = useState<{ user: User; text: string } | null>(null);
   const [isGeneratingBriefing, setIsGeneratingBriefing] = useState<{ active: boolean, user: User | null }>({ active: false, user: null });
   const isGeneratingBriefingRef = useRef(false);
@@ -136,21 +138,23 @@ function AppContent() {
   const [schedulingDinnerFor, setSchedulingDinnerFor] = useState<Recipe | null>(null);
   
   // New state for AI Chat Modal
-  const [chatMessages, setChatMessages] = useState<ChatMessage[]>([]);
+  const chatMessages = persistentState.chatMessages;
+  const setChatMessages = useCallback((updater: React.SetStateAction<ChatMessage[]>) => {
+    setPersistentField('chatMessages', updater);
+  }, [setPersistentField]);
   const [isAiChatOpen, setIsAiChatOpen] = useState(false);
 
   // New state for Storyboard
-  const [story, setStory] = useState<StoryPage[]>([]);
+  const story = persistentState.story;
+  const setStory = useCallback((updater: React.SetStateAction<StoryPage[]>) => {
+    setPersistentField('story', updater);
+  }, [setPersistentField]);
   const [isGeneratingStory, setIsGeneratingStory] = useState(false);
   const [profile, setProfile] = useState<GoogleProfile | null>(null);
 
   const { showToast } = useToast();
   
   const [audioInitialized, setAudioInitialized] = useState(false);
-
-  useEffect(() => {
-      localStorage.setItem('hearth_briefing_status', JSON.stringify(briefingStatus));
-  }, [briefingStatus]);
 
   useEffect(() => {
     if (getAccessToken()) {
@@ -334,6 +338,54 @@ function AppContent() {
       showToast(`Set "${recipe.recipeName}" for dinner on ${friendlyDate}.`, 'success');
   }, [setDinnerForDay, showToast]);
 
+  const handleVoiceSetDinner = useCallback((dateKey: string, mealName: string) => {
+      const recipe: Recipe = {
+          id: `voice-dinner-${dateKey}`,
+          recipeName: mealName,
+          description: 'Dinner added by voice.',
+          ingredients: [],
+          instructions: [],
+      };
+      setDinnerForDay(dateKey, recipe);
+      setEvents(prev => {
+          const existingDinner = prev.find(event => event.source === 'family' && event.date === dateKey && event.title.startsWith('Dinner:'));
+          if (existingDinner) {
+              return prev.map(event => event.id === existingDinner.id
+                  ? { ...event, title: `Dinner: ${mealName}`, time: '6:00 PM' }
+                  : event);
+          }
+          return [...prev, {
+              id: Date.now(),
+              title: `Dinner: ${mealName}`,
+              time: '6:00 PM',
+              date: dateKey,
+              color: 'bg-purple-500',
+              source: 'family',
+          }];
+      });
+  }, [setDinnerForDay, setEvents]);
+
+  const handleVoiceRemoveDinner = useCallback((dateKey: string) => {
+      setDinnerForDay(dateKey, null);
+      setEvents(prev => prev.filter(event => !(event.source === 'family' && event.date === dateKey && event.title.startsWith('Dinner:'))));
+  }, [setDinnerForDay, setEvents]);
+
+  const handleVoiceLaunchGame = useCallback((game: Game) => {
+      setInitialGame(game);
+      setActiveView('games');
+  }, []);
+
+  const handleVoiceCloseCurrent = useCallback(() => {
+      if (briefingData) return setBriefingData(null);
+      if (isAiChatOpen) return setIsAiChatOpen(false);
+      if (schedulingDinnerFor) return setSchedulingDinnerFor(null);
+      if (selectedRecipe) return setSelectedRecipe(null);
+      if (editingEvent) return setEditingEvent(null);
+      if (selectedDay) return setSelectedDay(null);
+      setActiveView(null);
+      setInitialGame(null);
+  }, [briefingData, editingEvent, isAiChatOpen, schedulingDinnerFor, selectedDay, selectedRecipe]);
+
   const handleSetActiveInput = useCallback((key: string, value: string, setValue: (value: string) => void) => {
       setActiveInput({ key, value, setValue });
   }, []);
@@ -381,39 +433,86 @@ function AppContent() {
     fetchPersonalizedRecipes();
   }, [fetchPersonalizedRecipes]);
 
+  const proactiveCheckInFlightRef = useRef(false);
+  const hasMountedProactiveDependenciesRef = useRef(false);
+  const proactiveContextRef = useRef({
+    proactiveSuggestion,
+    activeView,
+    isGeneratingBriefing,
+    briefingData,
+    lastSuggestionTimestamp,
+    eventsByDate,
+    groceryList,
+    weatherData,
+    userLocation: persistentState.location,
+  });
+
   useEffect(() => {
-    const PROACTIVE_CHECK_INTERVAL = 30000;
+    proactiveContextRef.current = {
+      proactiveSuggestion,
+      activeView,
+      isGeneratingBriefing,
+      briefingData,
+      lastSuggestionTimestamp,
+      eventsByDate,
+      groceryList,
+      weatherData,
+      userLocation: persistentState.location,
+    };
+  });
+
+  const runProactiveCheck = useCallback(async () => {
     const SUGGESTION_COOLDOWN = 5 * 60 * 1000;
+    const context = proactiveContextRef.current;
+    const weatherToday = context.weatherData[0];
+    const shouldCheck =
+      !proactiveCheckInFlightRef.current &&
+      !context.proactiveSuggestion &&
+      !context.activeView &&
+      !context.isGeneratingBriefing.active &&
+      !context.briefingData &&
+      Boolean(weatherToday) &&
+      Date.now() - context.lastSuggestionTimestamp > SUGGESTION_COOLDOWN;
 
-    const intervalId = setInterval(async () => {
-        const shouldCheck = 
-            !proactiveSuggestion &&
-            !activeView &&
-            !isGeneratingBriefing.active &&
-            !briefingData &&
-            Date.now() - lastSuggestionTimestamp > SUGGESTION_COOLDOWN;
+    if (!shouldCheck || !weatherToday) return;
 
-        if (shouldCheck) {
-            const allEvents = Object.keys(eventsByDate).reduce((acc: CalendarEvent[], key) => acc.concat(eventsByDate[key]), []);
-            try {
-                const weatherToday = weatherData.length > 0 ? weatherData[0] : null;
-                const suggestion = await getProactiveSuggestion(
-                    allEvents,
-                    groceryList,
-                    weatherToday
-                );
+    proactiveCheckInFlightRef.current = true;
+    const allEvents = Object.values(context.eventsByDate).flat();
 
-                if (suggestion) {
-                    setProactiveSuggestion(suggestion);
-                }
-            } catch (error) {
-                console.error("Error fetching proactive suggestion:", error);
-            }
-        }
-    }, PROACTIVE_CHECK_INTERVAL);
+    try {
+      const suggestion = await getProactiveSuggestion(
+        allEvents,
+        context.groceryList,
+        weatherToday,
+        context.userLocation || undefined
+      );
 
-    return () => clearInterval(intervalId);
-  }, [proactiveSuggestion, activeView, lastSuggestionTimestamp, eventsByDate, groceryList, isGeneratingBriefing, briefingData, weatherData]);
+      if (suggestion) {
+        setProactiveSuggestion(suggestion);
+      }
+    } catch (error) {
+      console.error("Error fetching proactive suggestion:", error);
+    } finally {
+      proactiveCheckInFlightRef.current = false;
+    }
+  }, []);
+
+  // Run once at boot, then use a coarse refresh window for weather-driven changes.
+  useEffect(() => {
+    const PROACTIVE_REFRESH_INTERVAL = 6 * 60 * 60 * 1000;
+    void runProactiveCheck();
+    const intervalId = window.setInterval(() => void runProactiveCheck(), PROACTIVE_REFRESH_INTERVAL);
+    return () => window.clearInterval(intervalId);
+  }, [runProactiveCheck]);
+
+  // Re-check when the data that informs a suggestion actually changes.
+  useEffect(() => {
+    if (!hasMountedProactiveDependenciesRef.current) {
+      hasMountedProactiveDependenciesRef.current = true;
+      return;
+    }
+    void runProactiveCheck();
+  }, [eventsByDate, groceryList, weatherData, persistentState.location, runProactiveCheck]);
   
   const handleAcceptSuggestion = useCallback((suggestion: ProactiveSuggestion) => {
     if (suggestion.type === 'grocery' && suggestion.actionableItem) {
@@ -443,12 +542,12 @@ function AppContent() {
   };
   
   const handleGeneralQuery = useCallback((userQuery: string, modelResponse: string) => {
-    setChatMessages([
+    setChatMessages(previous => [...previous,
         { role: 'user', content: userQuery },
         { role: 'model', content: modelResponse },
     ]);
     setIsAiChatOpen(true);
-}, []);
+}, [setChatMessages]);
 
     // --- Storyboard Handlers ---
     const handleStartStory = useCallback(async (prompt: string) => {
@@ -504,7 +603,7 @@ function AppContent() {
             case 'recipes':
                 return <RecipesApp recipes={recipes} onSelectRecipe={setSelectedRecipe} isFetching={isFetchingRecipes} onSearch={handleSearchRecipes} />;
             case 'mealPlanner':
-                return <MealPlannerApp onAddCalendarEvent={handleAddCalendarEventWithToast} onScheduleDinner={handleSetDinnerForDayWithToast} onRemoveDinner={(dateKey) => setDinnerForDay(dateKey, null)} dinnerPlan={dinnerPlan} />;
+                return <MealPlannerApp onAddCalendarEvent={handleAddCalendarEventWithToast} onScheduleDinner={handleSetDinnerForDayWithToast} onRemoveDinner={handleVoiceRemoveDinner} dinnerPlan={dinnerPlan} />;
             case 'events':
                 return <LocalEvents onAddCalendarEvent={handleAddCalendarEventWithToast} />;
             case 'games':
@@ -634,7 +733,9 @@ function AppContent() {
             <VoiceAssistant
                 notes={notes}
                 onAddNote={addNote}
+                onUpdateNote={updateNote}
                 onDeleteNote={deleteNote}
+                onChangeNoteColor={changeNoteColor}
                 eventsBySource={eventsBySourceAndDate}
                 onAddCalendarEvent={handleAddCalendarEventWithToast}
                 onDeleteCalendarEvent={deleteCalendarEvent}
@@ -642,9 +743,15 @@ function AppContent() {
                 groceryList={groceryList}
                 onAddGroceryItem={handleAddGroceryItemWithClear}
                 onToggleGroceryItem={toggleGroceryItem}
+                onRenameGroceryItem={renameGroceryItem}
+                onRemoveGroceryItem={removeGroceryItem}
                 onClearCompletedGroceries={clearCompletedGroceries}
                 setActiveModal={handleSetActiveView}
-                onSetDinnerForDay={handleSetDinnerForDayWithToast}
+                onLaunchGame={handleVoiceLaunchGame}
+                onCloseCurrent={handleVoiceCloseCurrent}
+                onSetDinnerForDay={handleVoiceSetDinner}
+                onRemoveDinnerForDay={handleVoiceRemoveDinner}
+                onSearchRecipes={handleSearchRecipes}
                 onGeneralQuery={handleGeneralQuery}
                 onStartStory={handleStartStory}
             />
@@ -657,19 +764,21 @@ function AppContent() {
 
 function App() {
     return (
-        <DndProvider backend={HTML5Backend}>
-            <ToastProvider>
-                <CalendarProvider>
-                    <GroceryProvider>
-                        <NotesProvider>
-                            <RecipeProvider>
-                                <AppContent />
-                            </RecipeProvider>
-                        </NotesProvider>
-                    </GroceryProvider>
-                </CalendarProvider>
-            </ToastProvider>
-        </DndProvider>
+        <PersistentStateProvider>
+            <DndProvider backend={HTML5Backend}>
+                <ToastProvider>
+                    <CalendarProvider>
+                        <GroceryProvider>
+                            <NotesProvider>
+                                <RecipeProvider>
+                                    <AppContent />
+                                </RecipeProvider>
+                            </NotesProvider>
+                        </GroceryProvider>
+                    </CalendarProvider>
+                </ToastProvider>
+            </DndProvider>
+        </PersistentStateProvider>
     );
 }
 

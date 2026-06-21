@@ -4,6 +4,7 @@ import type { Recipe } from '../types';
 import { useToast } from './Toast';
 import { DraggableRecipeCard } from './DraggableRecipeCard';
 import { useRecipes } from '../contexts/RecipeContext';
+import { Trash2Icon } from './icons';
 
 const days = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
 
@@ -37,12 +38,20 @@ const DayColumn: React.FC<{
             <p className="text-xs text-slate-500 text-center mb-3">{new Date(dateKey + 'T00:00:00').toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}</p>
             <div className="space-y-2 flex-grow overflow-y-auto">
                 {recipe ? (
-                    <div className="bg-white rounded-lg shadow relative overflow-hidden group">
+                    <div className="overflow-hidden rounded-lg bg-white shadow">
                         {recipe.imageUrl && (
-                            <img src={recipe.imageUrl} alt={recipe.recipeName} className="w-full h-24 object-cover opacity-90 group-hover:opacity-100 transition-opacity" />
+                            <img src={recipe.imageUrl} alt={recipe.recipeName} className="h-24 w-full object-cover" />
                         )}
-                        <p className="font-semibold text-xs p-2 truncate">{recipe.recipeName}</p>
-                        <button onClick={() => onRemove(dateKey)} className="absolute top-1 right-1 bg-white/80 rounded-full w-6 h-6 flex items-center justify-center text-slate-500 hover:text-red-500 hover:bg-white text-xs opacity-0 group-hover:opacity-100 transition-opacity shadow-sm">x</button>
+                        <p className="truncate p-2 text-xs font-semibold">{recipe.recipeName}</p>
+                        <button
+                            type="button"
+                            onClick={() => onRemove(dateKey)}
+                            aria-label={`Remove ${recipe.recipeName} from ${day}`}
+                            className="flex min-h-11 w-full items-center justify-center gap-1 border-t border-red-100 bg-red-50 px-2 py-2 text-xs font-bold text-red-700 transition-colors hover:bg-red-100 active:bg-red-200"
+                        >
+                            <Trash2Icon className="h-4 w-4 shrink-0" />
+                            <span>Remove</span>
+                        </button>
                     </div>
                 ) : (
                     <div className="text-center text-slate-400 text-sm pt-4 italic">Drop recipe here</div>
@@ -70,9 +79,9 @@ export const MealPlannerApp: React.FC<MealPlannerAppProps> = ({ onAddCalendarEve
     };
 
     return (
-        <div className="flex h-full gap-4">
+        <div className="flex h-full flex-col gap-4 lg:flex-row">
             {/* Left side: Available Recipes */}
-            <div className="w-1/3 flex flex-col">
+            <div className="flex max-h-72 w-full flex-col lg:max-h-none lg:w-1/3">
                  <h2 className="text-2xl font-bold mb-4 text-slate-800">Saved Recipes</h2>
                  <div className="flex-grow overflow-y-auto pr-2 grid grid-cols-1 gap-3">
                     {savedRecipes.map((recipe) => (
@@ -87,28 +96,30 @@ export const MealPlannerApp: React.FC<MealPlannerAppProps> = ({ onAddCalendarEve
             </div>
 
             {/* Right side: Meal Planner */}
-            <div className="w-2/3 flex flex-col">
+            <div className="flex min-h-0 min-w-0 w-full flex-col lg:w-2/3">
                 <div className="flex justify-between items-center mb-4">
                     <h2 className="text-2xl font-bold text-slate-800">Weekly Meal Planner</h2>
                     <span className="text-slate-500 text-sm font-medium bg-slate-100 px-3 py-1 rounded-full">Auto-saves to Calendar</span>
                 </div>
-                <div className="grid grid-cols-7 gap-3 flex-grow">
-                    {days.map((day, index) => {
-                        const targetDate = new Date(today);
-                        targetDate.setDate(today.getDate() - currentDayOfWeek + index);
-                        const dateKey = targetDate.toISOString().split('T')[0];
-                        
-                        return (
-                            <DayColumn
-                                key={day}
-                                day={day}
-                                dateKey={dateKey}
-                                recipe={dinnerPlan[dateKey]}
-                                onDrop={handleDrop}
-                                onRemove={handleRemove}
-                            />
-                        );
-                    })}
+                <div className="flex-grow overflow-x-auto pb-3 touch-pan-x">
+                    <div className="grid h-full min-w-[980px] grid-cols-7 gap-3">
+                        {days.map((day, index) => {
+                            const targetDate = new Date(today);
+                            targetDate.setDate(today.getDate() - currentDayOfWeek + index);
+                            const dateKey = targetDate.toISOString().split('T')[0];
+
+                            return (
+                                <DayColumn
+                                    key={day}
+                                    day={day}
+                                    dateKey={dateKey}
+                                    recipe={dinnerPlan[dateKey]}
+                                    onDrop={handleDrop}
+                                    onRemove={handleRemove}
+                                />
+                            );
+                        })}
+                    </div>
                 </div>
             </div>
         </div>

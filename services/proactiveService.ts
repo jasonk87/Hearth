@@ -25,7 +25,8 @@ const proactiveSuggestionSchema = {
 export async function getProactiveSuggestion(
     events: CalendarEvent[],
     groceryList: GroceryItem[],
-    weather: WeatherData
+    weather: WeatherData,
+    userLocation?: string
 ): Promise<ProactiveSuggestion | null> {
     if (USE_FAKE_DATA) {
         return Promise.resolve(null);
@@ -40,8 +41,10 @@ export async function getProactiveSuggestion(
 
     const incompleteGroceries = groceryList.filter(i => !i.completed).map(i => i.name);
     
-    // Fetch local events
-    const localEvents = await getLocalEvents('Los Angeles');
+    const locationQuery = userLocation?.trim() || 'Bowling Green, KY';
+
+    // Fetch events for the user's location rather than a fixed city.
+    const localEvents = await getLocalEvents(locationQuery);
     const upcomingLocalEvents = localEvents.filter(e => {
         const eventDate = new Date(e.date);
         const today = new Date();
