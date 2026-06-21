@@ -1,6 +1,6 @@
 
 import React, { useState, useRef, useEffect, useCallback } from 'react';
-import { Modality, LiveSession, LiveServerMessage, GenerateContentResponse } from '@google/genai';
+import { Modality, Session, LiveServerMessage, GenerateContentResponse } from '@google/genai';
 import { 
     ai, createBlob, 
     launchAppFunctionDeclaration,
@@ -77,7 +77,7 @@ const findEventByDetails = (eventsBySource: Record<CalendarSource, Record<string
 export const VoiceAssistant: React.FC<VoiceAssistantProps> = (props) => {
   const [isListening, setIsListening] = useState(false);
   const { showToast } = useToast();
-  const sessionPromiseRef = useRef<Promise<LiveSession> | null>(null);
+  const sessionPromiseRef = useRef<Promise<Session> | null>(null);
   const mediaStreamRef = useRef<MediaStream | null>(null);
   const audioContextRef = useRef<AudioContext | null>(null);
   const scriptProcessorRef = useRef<ScriptProcessorNode | null>(null);
@@ -175,8 +175,13 @@ export const VoiceAssistant: React.FC<VoiceAssistantProps> = (props) => {
             const { itemName } = args;
             try {
                 const response: GenerateContentResponse = await ai.models.generateContent({
-                    model: 'gemini-2.5-flash',
+                    model: 'gemini-2.5-flash-lite',
                     contents: `Categorize the grocery item "${itemName}" into one of these exact categories: Produce, Dairy, Meat, Bakery, Pantry, Frozen, Drinks, Household, Other.`,
+                    config: {
+                        thinkingConfig: {
+                            thinkingBudget: 24576,
+                        }
+                    }
                 });
                 const section = response.text.trim();
                 props.onAddGroceryItem(itemName, section);
@@ -289,8 +294,13 @@ export const VoiceAssistant: React.FC<VoiceAssistantProps> = (props) => {
     const handleAskAi = async (query: string) => {
         try {
             const response = await ai.models.generateContent({
-                model: 'gemini-2.5-flash',
+                model: 'gemini-2.5-flash-lite',
                 contents: query,
+                config: {
+                    thinkingConfig: {
+                        thinkingBudget: 24576,
+                    }
+                }
             });
             props.onGeneralQuery(query, response.text);
         } catch (e) {

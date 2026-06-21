@@ -1,7 +1,8 @@
 
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import type { User } from '../types';
-import { getBriefingAudio, decode, decodeAudioData } from '../services/geminiService';
+import { decode, decodeAudioData } from '../services/geminiService';
+import { getBriefingAudio } from '../services/briefingService';
 import { XIcon, SparklesIcon, PlayIcon, PauseIcon, RefreshCwIcon } from './icons';
 
 interface DailyBriefingProps {
@@ -14,12 +15,36 @@ export const DailyBriefing: React.FC<DailyBriefingProps> = ({ user, briefingText
   const [isLoadingAudio, setIsLoadingAudio] = useState(true);
   const [isPlaying, setIsPlaying] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [useWebSpeech, setUseWebSpeech] = useState(false);
 
   const audioContextRef = useRef<AudioContext | null>(null);
   const audioBufferRef = useRef<AudioBuffer | null>(null);
   const audioSourceRef = useRef<AudioBufferSourceNode | null>(null);
+  const useWebSpeechRef = useRef(false);
+  const utteranceRef = useRef<SpeechSynthesisUtterance | null>(null);
 
   const playAudio = useCallback(() => {
+    if (useWebSpeechRef.current) {
+        window.speechSynthesis.cancel();
+        const utterance = new SpeechSynthesisUtterance(briefingText);
+        const voices = window.speechSynthesis.getVoices();
+        const voice = voices.find(v => v.lang.startsWith('en') && v.name.includes('Google')) || 
+                      voices.find(v => v.lang.startsWith('en')) || 
+                      voices[0];
+        if (voice) {
+            utterance.voice = voice;
+        }
+        utterance.onend = () => setIsPlaying(false);
+        utterance.onerror = (e) => {
+            console.error("Web Speech error:", e);
+            setIsPlaying(false);
+        };
+        utteranceRef.current = utterance;
+        window.speechSynthesis.speak(utterance);
+        setIsPlaying(true);
+        return;
+    }
+
     if (!audioBufferRef.current || !audioContextRef.current) return;
     if (audioContextRef.current.state === 'suspended') {
         audioContextRef.current.resume();
@@ -38,9 +63,15 @@ export const DailyBriefing: React.FC<DailyBriefingProps> = ({ user, briefingText
     
     audioSourceRef.current = source;
     setIsPlaying(true);
-  }, []);
+  }, [briefingText]);
 
   const pauseAudio = useCallback(() => {
+    if (useWebSpeechRef.current) {
+        window.speechSynthesis.cancel();
+        setIsPlaying(false);
+        return;
+    }
+
     if (audioSourceRef.current) {
         audioSourceRef.current.stop();
         audioSourceRef.current = null;
@@ -77,9 +108,24 @@ export const DailyBriefing: React.FC<DailyBriefingProps> = ({ user, briefingText
             setIsLoadingAudio(false);
             playAudio();
         } catch (err) {
-            console.error("Failed to load briefing audio:", err);
-            setError("Couldn't load audio for the briefing.");
+            console.error("Failed to load Gemini briefing audio, falling back to Web Speech:", err);
+            if (isCancelled) return;
+            
+            useWebSpeechRef.current = true;
+            setUseWebSpeech(true);
             setIsLoadingAudio(false);
+            setError(null);
+            
+            // Wait for voices to load if not already ready, then play
+            if (window.speechSynthesis.getVoices().length === 0) {
+                const handleVoicesChanged = () => {
+                    window.speechSynthesis.removeEventListener('voiceschanged', handleVoicesChanged);
+                    if (!isCancelled) playAudio();
+                };
+                window.speechSynthesis.addEventListener('voiceschanged', handleVoicesChanged);
+            } else {
+                playAudio();
+            }
         }
     };
 
@@ -88,6 +134,7 @@ export const DailyBriefing: React.FC<DailyBriefingProps> = ({ user, briefingText
     return () => {
         isCancelled = true;
         pauseAudio();
+        window.speechSynthesis.cancel();
         if (audioContextRef.current && audioContextRef.current.state !== 'closed') {
             audioContextRef.current.close().catch(e => console.error("Error closing audio context:", e));
             audioContextRef.current = null;
@@ -125,6 +172,7 @@ export const DailyBriefing: React.FC<DailyBriefingProps> = ({ user, briefingText
                 >
                     {isLoadingAudio ? <RefreshCwIcon className="w-6 h-6 animate-spin"/> : (isPlaying ? <PauseIcon className="w-6 h-6"/> : <PlayIcon className="w-6 h-6"/>)}
                 </button>
+                {useWebSpeech && <span className="text-slate-400 text-sm italic">Local speech mode</span>}
                 {error && <span className="text-red-400 text-sm">{error}</span>}
             </div>
             <button

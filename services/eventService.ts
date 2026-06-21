@@ -1,80 +1,133 @@
-
 import { LocalEvent } from '../types';
+import { ai } from './geminiService';
 
-const API_KEY = import.meta.env.VITE_HASDATA_API_KEY;
-const USE_FAKE_DATA = import.meta.env.VITE_USE_FAKE_DATA === 'true';
+const API_KEY = import.meta.env.VITE_SERPAPI_KEY;
+const USE_FAKE_DATA = import.meta.env.VITE_USE_FAKE_DATA === 'true' || !API_KEY;
 
-const fakeEvents: LocalEvent[] = [
+const fallbackEvents: LocalEvent[] = [
   {
     id: '1',
     title: 'Farmers Market',
-    date: '2024-07-27',
+    date: 'Upcoming Saturday',
     time: '9:00 AM',
     location: 'Central Square',
     description: 'Fresh produce, local crafts, and live music.',
-    imageUrl: 'https://example.com/farmers-market.jpg',
+    imageUrl: 'https://images.unsplash.com/photo-1488459716781-31db52582fe9?q=80&w=2070&auto=format&fit=crop',
   },
   {
     id: '2',
     title: 'Outdoor Movie Night: The Goonies',
-    date: '2024-07-27',
+    date: 'Upcoming Friday',
     time: '8:30 PM',
     location: 'City Park',
     description: 'Bring a blanket and enjoy a classic movie under the stars.',
-    imageUrl: 'https://example.com/movie-night.jpg',
+    imageUrl: 'https://images.unsplash.com/photo-1595769816263-9b910be24d5f?q=80&w=2079&auto=format&fit=crop',
   },
   {
     id: '3',
     title: 'Live Jazz at The Blue Note',
-    date: '2024-07-28',
+    date: 'Upcoming Sunday',
     time: '7:00 PM',
     location: 'The Blue Note Club',
     description: 'An evening of smooth jazz with the Miles Davis Quintet tribute band.',
-    imageUrl: 'https://example.com/jazz-club.jpg',
+    imageUrl: 'https://images.unsplash.com/photo-1511192336575-5a79af67a629?q=80&w=2000&auto=format&fit=crop',
   },
 ];
 
-export const getLocalEvents = async (latitude: number, longitude: number): Promise<LocalEvent[]> => {
+export const getLocalEvents = async (locationQuery: string): Promise<LocalEvent[]> => {
   if (USE_FAKE_DATA) {
-    console.log('Using fake local event data');
-    return Promise.resolve(fakeEvents);
+    console.log('Using fallback local event data');
+    return Promise.resolve(fallbackEvents);
   }
-
-  if (!API_KEY) {
-    console.error("VITE_HASDATA_API_KEY is not set. Please add it to your .env file.");
-    return [];
-  }
-
-  const url = `https://api.hasdata.com/google-events/v1/events?latitude=${latitude}&longitude=${longitude}&radius=50`;
 
   try {
-    const response = await fetch(url, {
-      headers: {
-        'x-api-key': API_KEY,
-      },
-    });
-
-    if (!response.ok) {
-      throw new Error(`API call failed with status: ${response.status}`);
+    console.log(`HEARTH DEBUG: Fetching events for: ${locationQuery}`);
+    
+    // 2. Expand search radius to 3 hours using Gemini
+    let surroundingCities: string[] = [];
+    try {
+        const aiResponse = await ai.models.generateContent({
+            model: 'gemini-2.5-flash-lite',
+            contents: `List exactly 2 major metropolitan cities that are within a 3-hour drive of ${locationQuery}. Return ONLY a comma-separated list of the city and state names (e.g. "Nashville TN, Louisville KY"). Do not include ${locationQuery} itself. No markdown, no extra text.`,
+        });
+        const citiesText = aiResponse.text.trim();
+        surroundingCities = citiesText.split(',').map(c => c.trim()).filter(c => c.length > 0);
+        console.log(`HEARTH DEBUG: Expanded 3-hour radius cities:`, surroundingCities);
+    } catch (e) {
+        console.warn("Failed to get surrounding cities from Gemini", e);
     }
 
-    const data = await response.json();
+    const searchQueries = [locationQuery, ...surroundingCities].map(city => `events in ${city}`);
+    
+    // 3. Fire all SerpApi requests in parallel via the Vite proxy
+    const fetchPromises = searchQueries.map(async (queryStr) => {
+        const query = encodeURIComponent(queryStr);
+        const proxyUrl = `/api/serp/search.json?engine=google_events&q=${query}&htichips=date:next_month&api_key=${API_KEY}`;
+        try {
+            const response = await fetch(proxyUrl);
+            if (!response.ok) return null;
+            const data = await response.json();
+            return data.events_results || [];
+        } catch (e) {
+            return [];
+        }
+    });
 
-    // The actual data structure will depend on the API response.
-    // This is a placeholder for the transformation logic.
-    const events: LocalEvent[] = data.map((event: any) => ({
-      id: event.id,
+    const resultsArray = await Promise.all(fetchPromises);
+    
+    // 4. Flatten and completely deduplicate the regional events
+    const allRawEvents: any[] = [];
+    const seenIds = new Set<string>();
+    
+    for (const results of resultsArray) {
+        if (!results) continue;
+        for (const event of results) {
+            // Create a unique fingerprint based on title and date to prevent overlaps
+            const uniqueFingerprint = (event.title + (event.date?.start_date || '')).replace(/\s+/g, '');
+            if (!seenIds.has(uniqueFingerprint)) {
+                seenIds.add(uniqueFingerprint);
+                allRawEvents.push(event);
+            }
+        }
+    }
+    
+    if (allRawEvents.length === 0) {
+        console.log("No events found from SerpApi. Falling back to default data.");
+        return fallbackEvents;
+    }
+
+    const rawEvents = allRawEvents.map((event: any, index: number) => ({
+      id: (event.title + index).replace(/\s+/g, ''),
       title: event.title,
-      date: new Date(event.date.start_date).toISOString().split('T')[0],
-      time: event.date.when,
-      location: event.address.join(', '),
-      description: event.description,
-      imageUrl: event.image,
+      date: event.date?.start_date || 'Upcoming',
+      time: event.date?.when || 'Check details',
+      location: event.address?.join(', ') || event.venue?.name || locationQuery,
+      description: event.description || '',
+      imageUrl: event.image || event.thumbnail || 'https://images.unsplash.com/photo-1492684223066-81342ee5ff30?q=80&w=2070&auto=format&fit=crop',
+      _rawDate: event.date?.start_date,
     }));
 
-    return events;
+    // Sort chronologically
+    rawEvents.sort((a: any, b: any) => {
+        if (!a._rawDate) return 1;
+        if (!b._rawDate) return -1;
+        // Google Events dates look like "Jul 27" or "Aug 1"
+        const currentYear = new Date().getFullYear();
+        const dateA = new Date(`${a._rawDate}, ${currentYear}`);
+        const dateB = new Date(`${b._rawDate}, ${currentYear}`);
+        
+        if (isNaN(dateA.getTime())) return 1;
+        if (isNaN(dateB.getTime())) return -1;
+        
+        return dateA.getTime() - dateB.getTime();
+    });
+
+    return rawEvents.map((e: any) => {
+        delete e._rawDate;
+        return e as LocalEvent;
+    });
   } catch (error) {
-    console.error('Failed to fetch local events:', error);
-    return [];
+    console.error('Failed to fetch local events via SerpApi:', error);
+    return fallbackEvents;
   }
 };

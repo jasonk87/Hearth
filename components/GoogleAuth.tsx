@@ -9,6 +9,7 @@ interface GoogleAuthProps {
 const GoogleAuth: React.FC<GoogleAuthProps> = ({ setProfile }) => {
   const login = useGoogleLogin({
     onSuccess: (codeResponse) => {
+      alert(`Granted Scopes: ${codeResponse.scope || 'none'}`);
       setAccessToken(codeResponse.access_token);
       getProfile().then(setProfile);
     },

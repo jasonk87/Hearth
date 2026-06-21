@@ -14,7 +14,16 @@ import { SeasonalBackground } from './components/SeasonalBackground';
 import { initAudioOnInteraction, playSound } from './services/soundService';
 import { RecipesApp } from './components/RecipesApp';
 import { RecipeDetailView } from './components/RecipeDetailView';
-import { getProactiveSuggestion, getPersonalizedRecipes, searchRecipes, generateDailyBriefing, generateStorySegment, generateStoryImage, getWeatherForecast } from './services/geminiService';
+import { getProactiveSuggestion } from './services/proactiveService';
+import { getPersonalizedRecipes, searchRecipes } from './services/recipeService';
+import { generateDailyBriefing } from './services/briefingService';
+import { generateStorySegment, generateStoryImage } from './services/storyService';
+import { getWeatherForecast } from './services/weatherService';
+import { NotesProvider, useNotes } from './contexts/NotesContext';
+import { GroceryProvider, useGroceries } from './contexts/GroceryContext';
+import { CalendarProvider, useCalendar } from './contexts/CalendarContext';
+import { RecipeProvider } from './contexts/RecipeContext';
+import { USE_FAKE_DATA } from './services/geminiService';
 import { setAccessToken, logout, getProfile, getAccessToken, getCalendarEvents } from './services/authService';
 import GoogleAuth from './components/GoogleAuth';
 import { DailyBriefing } from './components/DailyBriefing';
@@ -36,30 +45,6 @@ type ActiveInput = {
 
 export type ModalType = 'calendar' | 'games' | 'notes' | 'grocery' | 'recipes' | 'mealPlanner' | 'events';
 
-const today = new Date();
-const todayKey = today.toISOString().split('T')[0];
-const dayAfterTomorrow = new Date(today);
-dayAfterTomorrow.setDate(today.getDate() + 2);
-const dayAfterTomorrowKey = dayAfterTomorrow.toISOString().split('T')[0];
-const nextWeek = new Date(today);
-nextWeek.setDate(today.getDate() + 5);
-const nextWeekKey = nextWeek.toISOString().split('T')[0];
-
-const FAMILY_USER: User = { id: 'family', name: 'Family', avatar: '👨‍👩‍👧‍👦', color: 'border-green-500' };
-
-const initialEvents: CalendarEvent[] = [
-    { id: 1, time: '10:00 AM', title: 'Team Standup', color: 'bg-blue-500', source: 'family', participants: ['Alice', 'Bob'], date: todayKey },
-    { id: 2, time: '2:00 PM', title: 'Doctor Appointment', color: 'bg-red-500', source: 'family', participants: [], date: dayAfterTomorrowKey },
-    { id: 3, time: '6:00 PM', title: 'Soccer Practice', color: 'bg-green-500', source: 'family', participants: ['Alex'], date: todayKey },
-    { id: 4, time: '12:00 PM', title: 'Lunch', color: 'bg-purple-500', source: 'family', participants: ['Mom', 'Dad', 'Alex', 'Chloe'], date: nextWeekKey },
-    { id: 5, time: '9:00 AM', title: 'School Assembly', color: 'bg-yellow-500', source: 'family', participants: [], date: dayAfterTomorrowKey },
-];
-
-const initialNotes: Note[] = [
-    { id: 1, text: 'Grocery List:\n- Milk\n- Bread\n- Eggs', color: 'yellow' },
-    { id: 2, text: 'Call plumber about leaky faucet in the kitchen.', color: 'pink' },
-    { id: 3, text: 'Soccer practice for Jamie is at 6 PM on Friday.', color: 'blue' },
-];
 
 // --- Sidebar Components ---
 const SidebarItem: React.FC<{
@@ -114,25 +99,16 @@ const Sidebar: React.FC<{
 };
 
 
+const FAMILY_USER: User = { id: 'family', name: 'Family', avatar: '👨‍👩‍👧‍👦', color: 'border-green-500' };
+
 function AppContent() {
-  const [notes, setNotes] = useState<Note[]>(() => {
-    const savedNotes = localStorage.getItem('hearth-notes');
-    try {
-        return savedNotes ? JSON.parse(savedNotes) : initialNotes;
-    } catch {
-        return initialNotes;
-    }
-  });
+  const { notes, addNote, updateNote, deleteNote, changeNoteColor } = useNotes();
+  const { groceryList, addGroceryItem, toggleGroceryItem, clearCompletedGroceries, addFromRecipe } = useGroceries();
+  const { events, setEvents, weatherData, dinnerPlan, addCalendarEvent, editCalendarEvent, deleteCalendarEvent, setDinnerForDay, eventsByDate, eventsBySourceAndDate } = useCalendar();
+
   const [activeInput, setActiveInput] = useState<ActiveInput>(null);
-  const [events, setEvents] = useState<CalendarEvent[]>(initialEvents);
   const [activeView, setActiveView] = useState<ModalType | null>(null);
-  const [groceryList, setGroceryList] = useState<GroceryItem[]>([
-      { id: 1, name: 'Milk', completed: false, section: 'Dairy' },
-      { id: 2, name: 'Bread', completed: true, section: 'Bakery' },
-      { id: 3, name: 'Apples', completed: false, section: 'Produce' },
-  ]);
   const [recipes, setRecipes] = useState<Recipe[]>([]);
-  const [weatherData, setWeatherData] = useState<WeatherData[]>([]);
   
   // State for controlled inputs for on-screen keyboard
   const [newGroceryItemName, setNewGroceryItemName] = useState('');
@@ -145,19 +121,18 @@ function AppContent() {
   const [initialGame, setInitialGame] = useState<Game | null>(null);
   
   // New state for daily briefing
-  const [briefingStatus, setBriefingStatus] = useState<Record<string, string>>({}); // { userId: 'YYYY-MM-DD' }
+  const [briefingStatus, setBriefingStatus] = useState<Record<string, string>>(() => {
+      const saved = localStorage.getItem('hearth_briefing_status');
+      return saved ? JSON.parse(saved) : {};
+  });
   const [briefingData, setBriefingData] = useState<{ user: User; text: string } | null>(null);
   const [isGeneratingBriefing, setIsGeneratingBriefing] = useState<{ active: boolean, user: User | null }>({ active: false, user: null });
+  const isGeneratingBriefingRef = useRef(false);
 
   // New state for proactive assistant
   const [proactiveSuggestion, setProactiveSuggestion] = useState<ProactiveSuggestion | null>(null);
   const [lastSuggestionTimestamp, setLastSuggestionTimestamp] = useState<number>(0);
 
-  // New state for dinner planning
-  const [dinnerPlan, setDinnerPlan] = useState<Record<string, string>>({
-    [todayKey]: 'Taco Night',
-    [dayAfterTomorrowKey]: 'Pizza',
-  });
   const [schedulingDinnerFor, setSchedulingDinnerFor] = useState<Recipe | null>(null);
   
   // New state for AI Chat Modal
@@ -174,6 +149,10 @@ function AppContent() {
   const [audioInitialized, setAudioInitialized] = useState(false);
 
   useEffect(() => {
+      localStorage.setItem('hearth_briefing_status', JSON.stringify(briefingStatus));
+  }, [briefingStatus]);
+
+  useEffect(() => {
     if (getAccessToken()) {
       getProfile().then(setProfile);
     }
@@ -182,19 +161,42 @@ function AppContent() {
   useEffect(() => {
     if (profile) {
       getCalendarEvents().then((events) => {
-        const formattedEvents = events.map((event: GoogleCalendarEvent) => ({
-            id: event.id,
-            time: new Date(event.start.dateTime).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
-            title: event.summary,
-            color: 'bg-blue-500',
-            source: 'google',
-            participants: event.attendees ? event.attendees.map((a) => a.email) : [],
-            date: event.start.dateTime.split('T')[0],
-        }));
-        setEvents(formattedEvents);
+        console.log("HEARTH DEBUG: App.tsx getCalendarEvents success. Raw events count:", events.length);
+        if (events.length === 0) {
+          showToast("Successfully authenticated but found 0 events on your Google Calendar.", "info");
+        } else {
+          showToast(`Successfully loaded ${events.length} events from your Google Calendar!`, "success");
+        }
+        const formattedEvents = events
+          .filter((event: GoogleCalendarEvent) => event.start && (event.start.dateTime || event.start.date))
+          .map((event: GoogleCalendarEvent) => {
+            const startDateTime = event.start.dateTime || `${event.start.date}T00:00:00`;
+            const isAllDay = !event.start.dateTime;
+            
+            return {
+                id: event.id,
+                time: isAllDay ? 'All Day' : new Date(startDateTime).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+                title: event.summary,
+                color: event.backgroundColor || 'bg-blue-500',
+                source: 'google',
+                participants: event.attendees ? event.attendees.map((a) => a.displayName || a.email) : [],
+                date: startDateTime.split('T')[0],
+                calendarName: event.calendarName,
+                creatorEmail: event.creator?.email,
+            };
+          });
+        console.log("HEARTH DEBUG: App.tsx mapped formattedEvents example:", formattedEvents.slice(0, 3));
+        setEvents(prev => {
+            const localEvents = prev.filter(e => e.source === 'family');
+            return [...localEvents, ...formattedEvents];
+        });
+      }).catch((err: any) => {
+        console.error("Failed to fetch Google Calendar events:", err);
+        const errMsg = err.response?.data?.error?.message || err.message || err;
+        showToast(`Google Calendar Error: ${errMsg}. Please try logging out and signing in again to grant permissions.`, "error");
       });
     }
-  }, [profile]);
+  }, [profile, showToast]);
 
   const handleInteraction = useCallback(() => {
       if (!audioInitialized) {
@@ -204,8 +206,9 @@ function AppContent() {
   }, [audioInitialized]);
 
   const triggerDailyBriefing = useCallback(async (user: User) => {
-    if (isGeneratingBriefing.active || briefingData) return;
+    if (isGeneratingBriefingRef.current || isGeneratingBriefing.active || briefingData) return;
     
+    isGeneratingBriefingRef.current = true;
     setIsGeneratingBriefing({ active: true, user });
     showToast(`Preparing your daily briefing...`, 'success');
     
@@ -221,13 +224,16 @@ function AppContent() {
     } catch (error) {
         console.error("Failed to generate briefing:", error);
         showToast("Sorry, I couldn't prepare your briefing right now.", 'error');
+        // Prevent infinite loop by marking the briefing as attempted today
+        setBriefingStatus(prev => ({ ...prev, [user.id]: todayKey }));
     } finally {
+        isGeneratingBriefingRef.current = false;
         setIsGeneratingBriefing({ active: false, user: null });
     }
   }, [events, showToast, isGeneratingBriefing, briefingData, weatherData]);
 
   useEffect(() => {
-    if (isGeneratingBriefing.active || briefingData) return;
+    if (isGeneratingBriefingRef.current || isGeneratingBriefing.active || briefingData) return;
 
     const now = new Date();
     const todayKey = now.toISOString().split('T')[0];
@@ -253,18 +259,6 @@ function AppContent() {
       };
   }, []);
   
-  useEffect(() => {
-    const fetchWeather = async () => {
-        try {
-            const forecast = await getWeatherForecast();
-            setWeatherData(forecast);
-        } catch (error) {
-            console.error("Failed to fetch weather data:", error);
-            showToast("Couldn't fetch weather forecast.", "error");
-        }
-    };
-    fetchWeather();
-  }, [showToast]);
 
   const handleSetActiveView = (view: ModalType | null) => {
       if (view) {
@@ -286,169 +280,59 @@ function AppContent() {
       setEditingEvent(null);
   };
 
-  useEffect(() => {
-    localStorage.setItem('hearth-notes', JSON.stringify(notes));
-  }, [notes]);
   
-  const eventsByDate = useMemo(() => {
-    return events.reduce((acc, event) => {
-        const dayKey = event.date;
-        if (!acc[dayKey]) {
-          acc[dayKey] = [];
-        }
-        acc[dayKey].push(event);
-        return acc;
-    }, {} as Record<string, CalendarEvent[]>);
-  }, [events]);
-
   const handleUpdateNote = useCallback((id: number, text: string) => {
-    setNotes(prev => prev.map(n => n.id === id ? { ...n, text } : n));
+    updateNote(id, text);
     setActiveInput(prev => {
         if (prev && prev.key === `note-${id}`) {
             return { ...prev, value: text };
         }
         return prev;
     });
-  }, []);
-  
-  const handleAddNote = useCallback((text: string = '') => {
-    const newNote: Note = {
-      id: Date.now(),
-      text: text,
-      color: 'yellow',
-    };
-    setNotes(prev => [...prev, newNote]);
-  }, []);
+  }, [updateNote]);
 
   const handleCreateAndEditNote = useCallback(() => {
-    const newNote: Note = {
-        id: Date.now(),
-        text: '',
-        color: 'yellow',
-    };
-    setNotes(prev => [...prev, newNote]);
-    
+    const newNote = addNote('');
     setActiveInput({
         key: `note-${newNote.id}`,
         value: newNote.text,
         setValue: (newText) => handleUpdateNote(newNote.id, newText)
     });
-  }, [handleUpdateNote]);
+  }, [addNote, handleUpdateNote]);
 
-  const handleDeleteNote = useCallback((id: number) => {
-    playSound('delete');
-    setNotes(prev => prev.filter(n => n.id !== id));
-  }, []);
-
-  const handleChangeNoteColor = useCallback((id: number, color: NoteColor) => {
-    setNotes(prev => prev.map(n => n.id === id ? { ...n, color } : n));
-  }, []);
-
-  const handleAddGroceryItem = useCallback((name: string, section: string = 'Other') => {
-      if (name.trim() === '') return;
-      const trimmedName = name.trim();
-      const newItem: GroceryItem = {
-        id: Date.now(),
-        name: trimmedName.charAt(0).toUpperCase() + trimmedName.slice(1),
-        completed: false,
-        section,
-      };
-      setGroceryList(prev => [newItem, ...prev]);
-      setNewGroceryItemName('');
-  }, []);
-
-  const handleToggleGroceryItem = useCallback((id: number) => {
-    setGroceryList(prev => {
-        const item = prev.find(i => i.id === id);
-        if (item) {
-            playSound(item.completed ? 'toggleOff' : 'toggleOn');
-        }
-        return prev.map(i => i.id === id ? { ...i, completed: !i.completed } : i)
-    });
-  }, []);
-
-  const handleClearCompletedGroceries = useCallback(() => {
-    playSound('delete');
-    setGroceryList(prev => prev.filter(item => !item.completed));
-  }, []);
-  
   const handleAddToGroceryListFromRecipe = useCallback((recipe: Recipe) => {
-      let itemsAddedCount = 0;
-      recipe.ingredients.forEach(ingredient => {
-          const parts = ingredient.split(/\s*,\s*|\s+of\s+/);
-          let name = ingredient;
-          
-          if (parts.length > 1) {
-              name = parts[1];
-          } else {
-             const quantityMatch = ingredient.match(/^([\d/.\s]+(\w+)?)/);
-             if (quantityMatch && quantityMatch[0].length < ingredient.length / 2) {
-                 name = ingredient.replace(quantityMatch[0], '').trim();
-             }
-          }
-          
-          const newItem: GroceryItem = {
-            id: Date.now() + itemsAddedCount,
-            name: name.charAt(0).toUpperCase() + name.slice(1),
-            completed: false,
-            section: 'Other',
-          };
-          setGroceryList(prev => [newItem, ...prev]);
-          itemsAddedCount++;
-      });
+      const itemsAddedCount = addFromRecipe(recipe);
       setSelectedRecipe(null);
       showToast(`Added ${itemsAddedCount} ingredients to your grocery list.`, 'success');
-  }, [showToast]);
-  
+  }, [addFromRecipe, showToast]);
+
+  const handleAddGroceryItemWithClear = useCallback((name: string, section: string = 'Other') => {
+      addGroceryItem(name, section);
+      setNewGroceryItemName('');
+  }, [addGroceryItem]);
+
   const handleSaveEvent = useCallback((eventToSave: CalendarEvent) => {
-    setEvents(prev => prev.map(e => e.id === eventToSave.id ? eventToSave : e));
+    editCalendarEvent(eventToSave);
     setEditingEvent(null);
     showToast('Event saved successfully!', 'success');
-  }, [showToast]);
+  }, [editCalendarEvent, showToast]);
 
-  const handleDeleteEvent = useCallback((eventId: number) => {
-      playSound('delete');
-      setEvents(prev => prev.filter(e => e.id !== eventId));
+  const handleDeleteEvent = useCallback((eventId: CalendarEvent['id']) => {
+      deleteCalendarEvent(eventId);
       setEditingEvent(null);
       showToast('Event deleted.', 'success');
-  }, [showToast]);
+  }, [deleteCalendarEvent, showToast]);
   
-  const handleAddCalendarEvent = useCallback((title: string, date: string, time: string) => {
-    const newEvent: CalendarEvent = {
-      id: Date.now(),
-      time,
-      title,
-      color: 'bg-purple-500',
-      source: 'family',
-      date,
-    };
-    setEvents(prev => [...prev, newEvent]);
-    showToast('Event added to calendar!', 'success');
-  }, [showToast]);
+  const handleAddCalendarEventWithToast = useCallback((title: string, date: string, time: string) => {
+      addCalendarEvent(title, date, time);
+      showToast('Event added to calendar!', 'success');
+  }, [addCalendarEvent, showToast]);
   
-  const handleEditCalendarEvent = useCallback((eventToEdit: CalendarEvent) => {
-      setEvents(prev => prev.map(e => e.id === eventToEdit.id ? eventToEdit : e));
-  }, []);
-  
-  const handleDeleteCalendarEvent = useCallback((eventId: number) => {
-      setEvents(prev => prev.filter(e => e.id !== eventId));
-  }, []);
-  
-  const eventsBySourceAndDate = useMemo(() => {
-    return events.reduce((acc, event) => {
-      if (!acc[event.source]) acc[event.source] = {};
-      const dayKey = event.date;
-      if (!acc[event.source][dayKey]) acc[event.source][dayKey] = [];
-      acc[event.source][dayKey].push(event);
-      return acc;
-    }, { family: {} } as Record<CalendarSource, Record<string, CalendarEvent[]>>);
-  }, [events]);
-  
-  const handleSetDinnerForDay = useCallback((dateKey: string, dinner: string) => {
-    setDinnerPlan(prev => ({...prev, [dateKey]: dinner }));
-    const friendlyDate = new Date(dateKey + 'T00:00:00').toLocaleDateString('en-US', { weekday: 'long' });
-    showToast(`Set "${dinner}" for dinner on ${friendlyDate}.`, 'success');
-  }, [showToast]);
+  const handleSetDinnerForDayWithToast = useCallback((dateKey: string, recipe: Recipe) => {
+      setDinnerForDay(dateKey, recipe);
+      const friendlyDate = new Date(dateKey + 'T00:00:00').toLocaleDateString('en-US', { weekday: 'long' });
+      showToast(`Set "${recipe.recipeName}" for dinner on ${friendlyDate}.`, 'success');
+  }, [setDinnerForDay, showToast]);
 
   const handleSetActiveInput = useCallback((key: string, value: string, setValue: (value: string) => void) => {
       setActiveInput({ key, value, setValue });
@@ -533,7 +417,7 @@ function AppContent() {
   
   const handleAcceptSuggestion = useCallback((suggestion: ProactiveSuggestion) => {
     if (suggestion.type === 'grocery' && suggestion.actionableItem) {
-        handleAddGroceryItem(suggestion.actionableItem, 'Other');
+        handleAddGroceryItemWithClear(suggestion.actionableItem, 'Other');
         showToast(`Added "${suggestion.actionableItem}" to your grocery list.`, 'success');
     } else if (suggestion.type === 'event') {
         setActiveView('events');
@@ -541,7 +425,7 @@ function AppContent() {
     }
     setProactiveSuggestion(null);
     setLastSuggestionTimestamp(Date.now());
-  }, [handleAddGroceryItem, showToast]);
+  }, [handleAddGroceryItemWithClear, showToast]);
 
   const handleDismissSuggestion = useCallback(() => {
     setProactiveSuggestion(null);
@@ -614,15 +498,15 @@ function AppContent() {
     const renderActiveView = () => {
         switch (activeView) {
             case 'notes':
-                return <NotesApp notes={notes} onAdd={handleCreateAndEditNote} onUpdate={handleUpdateNote} onDelete={handleDeleteNote} onChangeColor={handleChangeNoteColor} onNoteFocus={(id) => { const note = notes.find(n => n.id === id); if(note) handleSetActiveInput(`note-${id}`, note.text, (newText) => handleUpdateNote(id, newText)) }} activeInputKey={activeInput?.key} />;
+                return <NotesApp notes={notes} onAdd={handleCreateAndEditNote} onUpdate={handleUpdateNote} onDelete={deleteNote} onChangeColor={changeNoteColor} onNoteFocus={(id) => { const note = notes.find(n => n.id === id); if(note) handleSetActiveInput(`note-${id}`, note.text, (newText) => handleUpdateNote(id, newText)) }} activeInputKey={activeInput?.key} />;
             case 'grocery':
-                return <GroceryApp items={groceryList} onToggle={handleToggleGroceryItem} onAdd={handleAddGroceryItem} onClearCompleted={handleClearCompletedGroceries} newItemName={newGroceryItemName} setNewItemName={syncSetValue('new-grocery-name', setNewGroceryItemName)} onNewItemNameFocus={() => handleSetActiveInput('new-grocery-name', newGroceryItemName, setNewGroceryItemName)} activeInputKey={activeInput?.key} />;
+                return <GroceryApp items={groceryList} onToggle={toggleGroceryItem} onAdd={handleAddGroceryItemWithClear} onClearCompleted={clearCompletedGroceries} newItemName={newGroceryItemName} setNewItemName={syncSetValue('new-grocery-name', setNewGroceryItemName)} onNewItemNameFocus={() => handleSetActiveInput('new-grocery-name', newGroceryItemName, setNewGroceryItemName)} activeInputKey={activeInput?.key} />;
             case 'recipes':
                 return <RecipesApp recipes={recipes} onSelectRecipe={setSelectedRecipe} isFetching={isFetchingRecipes} onSearch={handleSearchRecipes} />;
             case 'mealPlanner':
-                return <MealPlannerApp recipes={recipes} onAddCalendarEvent={handleAddCalendarEvent} onAddGroceryItem={handleAddGroceryItem} />;
+                return <MealPlannerApp onAddCalendarEvent={handleAddCalendarEventWithToast} onScheduleDinner={handleSetDinnerForDayWithToast} onRemoveDinner={(dateKey) => setDinnerForDay(dateKey, null)} dinnerPlan={dinnerPlan} />;
             case 'events':
-                return <LocalEvents onAddCalendarEvent={handleAddCalendarEvent} />;
+                return <LocalEvents onAddCalendarEvent={handleAddCalendarEventWithToast} />;
             case 'games':
                 return <GamesApp initialGame={initialGame} story={story} isGenerating={isGeneratingStory} onStartStory={handleStartStory} onContinueStory={handleContinueStory} onResetStory={handleResetStory} />;
             default:
@@ -732,7 +616,8 @@ function AppContent() {
                     onClose={() => setSchedulingDinnerFor(null)}
                     recipeName={schedulingDinnerFor.recipeName}
                     onSchedule={(dateKey, recipeName) => {
-                        handleSetDinnerForDay(dateKey, recipeName);
+                        handleSetDinnerForDayWithToast(dateKey, schedulingDinnerFor);
+                        addCalendarEvent(`Dinner: ${schedulingDinnerFor.recipeName}`, dateKey, '6:00 PM');
                         setSchedulingDinnerFor(null);
                     }}
                 />
@@ -748,18 +633,18 @@ function AppContent() {
             
             <VoiceAssistant
                 notes={notes}
-                onAddNote={handleAddNote}
-                onDeleteNote={handleDeleteNote}
+                onAddNote={addNote}
+                onDeleteNote={deleteNote}
                 eventsBySource={eventsBySourceAndDate}
-                onAddCalendarEvent={handleAddCalendarEvent}
-                onDeleteCalendarEvent={handleDeleteCalendarEvent}
-                onEditCalendarEvent={handleEditCalendarEvent}
+                onAddCalendarEvent={handleAddCalendarEventWithToast}
+                onDeleteCalendarEvent={deleteCalendarEvent}
+                onEditCalendarEvent={editCalendarEvent}
                 groceryList={groceryList}
-                onAddGroceryItem={handleAddGroceryItem}
-                onToggleGroceryItem={handleToggleGroceryItem}
-                onClearCompletedGroceries={handleClearCompletedGroceries}
+                onAddGroceryItem={handleAddGroceryItemWithClear}
+                onToggleGroceryItem={toggleGroceryItem}
+                onClearCompletedGroceries={clearCompletedGroceries}
                 setActiveModal={handleSetActiveView}
-                onSetDinnerForDay={handleSetDinnerForDay}
+                onSetDinnerForDay={handleSetDinnerForDayWithToast}
                 onGeneralQuery={handleGeneralQuery}
                 onStartStory={handleStartStory}
             />
@@ -774,7 +659,15 @@ function App() {
     return (
         <DndProvider backend={HTML5Backend}>
             <ToastProvider>
-                <AppContent />
+                <CalendarProvider>
+                    <GroceryProvider>
+                        <NotesProvider>
+                            <RecipeProvider>
+                                <AppContent />
+                            </RecipeProvider>
+                        </NotesProvider>
+                    </GroceryProvider>
+                </CalendarProvider>
             </ToastProvider>
         </DndProvider>
     );

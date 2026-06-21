@@ -1,375 +1,14 @@
-
 import { GoogleGenAI, FunctionDeclaration, Type, Blob, Modality } from '@google/genai';
-import type { User, Recipe, CalendarEvent, WeatherData, GroceryItem, ProactiveSuggestion, HangmanWord, LocalEvent } from '../types';
+import type { User, HangmanWord } from '../types';
 import { getLocalEvents } from './eventService';
 
-if (!import.meta.env.VITE_GEMINI_API_KEY && import.meta.env.VITE_USE_FAKE_DATA !== 'true') {
-  throw new Error("VITE_GEMINI_API_KEY environment variable not set");
-}
+const GEMINI_API_KEY = import.meta.env.VITE_GEMINI_API_KEY;
+export const USE_FAKE_DATA =
+    import.meta.env.VITE_USE_FAKE_DATA === 'true' ||
+    !GEMINI_API_KEY ||
+    GEMINI_API_KEY === 'YOUR_GEMINI_API_KEY';
 
-export const ai = new GoogleGenAI({ apiKey: import.meta.env.VITE_GEMINI_API_KEY });
-
-const MOCK_RECIPES: Recipe[] = [
-    {
-        recipeName: 'Classic Pancakes',
-        description: 'Fluffy and delicious pancakes, a perfect start to your day.',
-        ingredients: ['1 1/2 cups all-purpose flour', '3 1/2 teaspoons baking powder', '1 teaspoon salt', '1 tablespoon white sugar', '1 1/4 cups milk', '1 egg', '3 tablespoons butter, melted'],
-        instructions: ['In a large bowl, sift together the flour, baking powder, salt and sugar.', 'Make a well in the center and pour in the milk, egg and melted butter; mix until smooth.', 'Heat a lightly oiled griddle or frying pan over medium high heat.', 'Pour or scoop the batter onto the griddle, using approximately 1/4 cup for each pancake.', 'Brown on both sides and serve hot.'],
-    },
-    {
-        recipeName: 'Chicken Stir-Fry',
-        description: 'A quick and healthy stir-fry with tender chicken and fresh vegetables.',
-        ingredients: ['1 lb boneless, skinless chicken breast, cut into bite-sized pieces', '1 tablespoon soy sauce', '1 teaspoon cornstarch', '1 tablespoon vegetable oil', '1 cup broccoli florets', '1/2 red bell pepper, sliced', '1/4 cup chicken broth'],
-        instructions: ['In a small bowl, toss the chicken with soy sauce and cornstarch.', 'Heat the oil in a large skillet or wok over medium-high heat.', 'Add the chicken and cook until browned and cooked through.', 'Add the broccoli and bell pepper and cook for 3-4 minutes, or until tender-crisp.', 'Stir in the chicken broth and bring to a simmer.', 'Serve immediately with rice or noodles.'],
-    },
-];
-
-const MOCK_WEATHER: WeatherData[] = [
-    { day: 'Mon', temp: 72, condition: 'sunny', hourly: [{time: '3 PM', temp: 75, condition: 'sunny'}] },
-    { day: 'Tue', temp: 68, condition: 'partly-cloudy' },
-    { day: 'Wed', temp: 65, condition: 'rainy' },
-    { day: 'Thu', temp: 70, condition: 'cloudy' },
-    { day: 'Fri', temp: 75, condition: 'sunny' },
-    { day: 'Sat', temp: 78, condition: 'sunny' },
-    { day: 'Sun', temp: 76, condition: 'partly-cloudy' },
-];
-
-// --- Recipe Generation ---
-
-const recipeSchema = {
-    type: Type.OBJECT,
-    properties: {
-        recipes: {
-            type: Type.ARRAY,
-            items: {
-                type: Type.OBJECT,
-                properties: {
-                    recipeName: { type: Type.STRING, description: "The name of the recipe." },
-                    description: { type: Type.STRING, description: "A short, enticing description of the dish." },
-                    ingredients: { type: Type.ARRAY, items: { type: Type.STRING }, description: "A list of ingredients, including quantities." },
-                    instructions: { type: Type.ARRAY, items: { type: Type.STRING }, description: "Step-by-step cooking instructions." },
-                },
-                required: ["recipeName", "description", "ingredients", "instructions"]
-            }
-        }
-    },
-    required: ["recipes"]
-};
-
-const RECIPE_CACHE_KEY = 'hearth-recipes-cache';
-
-type MealType = 'breakfast' | 'lunch' | 'dinner';
-
-interface RecipeCacheEntry {
-    date: string; // YYYY-MM-DD
-    breakfast?: Recipe[];
-    lunch?: Recipe[];
-    dinner?: Recipe[];
-}
-
-interface RecipeCache {
-    [userId: string]: RecipeCacheEntry;
-}
-
-export async function getPersonalizedRecipes(): Promise<Recipe[]> {
-    if (import.meta.env.VITE_USE_FAKE_DATA === 'true') {
-        return Promise.resolve(MOCK_RECIPES);
-    }
-    const todayKey = new Date().toISOString().split('T')[0];
-    const hours = new Date().getHours();
-    const mealType: MealType = hours < 11 ? 'breakfast' : hours < 16 ? 'lunch' : 'dinner';
-    const familyUserId = 'family';
-
-    // 1. Check cache
-    try {
-        const cachedDataString = localStorage.getItem(RECIPE_CACHE_KEY);
-        if (cachedDataString) {
-            const recipeCache: RecipeCache = JSON.parse(cachedDataString);
-            const userCache = recipeCache[familyUserId];
-            
-            // Check if cache is for today and if the specific meal type is cached
-            if (userCache && userCache.date === todayKey && userCache[mealType]) {
-                return userCache[mealType]!;
-            }
-        }
-    } catch (e) {
-        console.error("Failed to read recipe cache:", e);
-        localStorage.removeItem(RECIPE_CACHE_KEY); // Clear corrupted cache
-    }
-    
-    // 2. If no valid cache, fetch from API
-    const userContext = 'the whole family, which may include parents and kids';
-
-    const prompt = `You are a helpful recipe assistant for a smart display. Suggest 3 interesting but not too complicated ${mealType} recipes suitable for ${userContext}.`;
-
-    const response = await ai.models.generateContent({
-        model: 'gemini-2.5-flash',
-        contents: prompt,
-        config: {
-            responseMimeType: "application/json",
-            responseSchema: recipeSchema,
-        },
-    });
-
-    const jsonText = response.text.trim();
-    const parsed = JSON.parse(jsonText);
-    
-    if (parsed.recipes && Array.isArray(parsed.recipes)) {
-        // 3. Update cache
-        try {
-            const cachedDataString = localStorage.getItem(RECIPE_CACHE_KEY);
-            const recipeCache: RecipeCache = cachedDataString ? JSON.parse(cachedDataString) : {};
-            
-            // Get or create the user cache entry for today
-            let userCache = recipeCache[familyUserId];
-            if (!userCache || userCache.date !== todayKey) {
-                userCache = { date: todayKey };
-            }
-
-            // Update the specific meal type
-            userCache[mealType] = parsed.recipes;
-            recipeCache[familyUserId] = userCache;
-            
-            localStorage.setItem(RECIPE_CACHE_KEY, JSON.stringify(recipeCache));
-        } catch (e) {
-            console.error("Failed to write to recipe cache:", e);
-        }
-        
-        return parsed.recipes;
-    }
-    throw new Error("Invalid format received for personalized recipes.");
-}
-
-export async function searchRecipes(query: string): Promise<Recipe[]> {
-    if (import.meta.env.VITE_USE_FAKE_DATA === 'true') {
-        return Promise.resolve(MOCK_RECIPES);
-    }
-    const prompt = `Find 5 recipes for ${query}.`;
-
-    const response = await ai.models.generateContent({
-        model: 'gemini-2.5-flash',
-        contents: prompt,
-        config: {
-            responseMimeType: "application/json",
-            responseSchema: recipeSchema,
-        },
-    });
-
-    const jsonText = response.text.trim();
-    const parsed = JSON.parse(jsonText);
-
-    if (parsed.recipes && Array.isArray(parsed.recipes)) {
-        return parsed.recipes;
-    }
-    throw new Error("Invalid format received for recipe search.");
-}
-
-export async function generateDailyBriefing(
-    events: CalendarEvent[],
-    weather: WeatherData
-): Promise<string> {
-    if (import.meta.env.VITE_USE_FAKE_DATA === 'true') {
-        return Promise.resolve("Good morning! The weather is sunny with a high of 72 degrees. You have one event today: a team stand-up at 10am. Have a great day!");
-    }
-    const today = new Date().toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric' });
-    
-    const eventsString = events.length > 0
-        ? `Here are the events for today: ${events.map(e => `${e.title} at ${e.time}`).join(', ')}.`
-        : "You have no events scheduled for today.";
-        
-    const weatherString = `The forecast is ${weather.condition.replace('-', ' ')} with a high of ${weather.temp} degrees.`;
-
-    const prompt = `
-        You are a friendly and helpful smart display assistant. 
-        Create a short, conversational daily briefing for the family.
-        Today is ${today}.
-        Keep it concise and positive, under 100 words.
-        Here is the information to include:
-        1. Weather: ${weatherString}
-        2. Calendar: ${eventsString}
-        
-        Start with a warm greeting like "Good morning, family." and end with an encouraging phrase.
-    `;
-
-    const response = await ai.models.generateContent({
-        model: 'gemini-2.5-pro',
-        contents: prompt,
-    });
-
-    return response.text.trim();
-}
-
-export async function getBriefingAudio(text: string): Promise<string> {
-    if (import.meta.env.VITE_USE_FAKE_DATA === 'true') {
-        return Promise.resolve("");
-    }
-    const response = await ai.models.generateContent({
-        model: "gemini-2.5-flash-preview-tts",
-        contents: [{ parts: [{ text: text }] }],
-        config: {
-            responseModalities: [Modality.AUDIO],
-            speechConfig: {
-                voiceConfig: {
-                  prebuiltVoiceConfig: { voiceName: 'Kore' }, // A calm, friendly voice
-                },
-            },
-        },
-    });
-
-    const base64Audio = response.candidates?.[0]?.content?.parts?.[0]?.inlineData?.data;
-    if (!base64Audio) {
-        throw new Error("Failed to generate audio for the briefing.");
-    }
-    return base64Audio;
-}
-
-// --- Storyboard Generation ---
-export async function generateStorySegment(prompt: string, existingStory: string = ''): Promise<string> {
-    if (import.meta.env.VITE_USE_FAKE_DATA === 'true') {
-        return Promise.resolve("Once upon a time, in a land filled with candy castles and chocolate rivers, lived a friendly dragon named Sparky. Sparky loved to fly, but he was afraid of heights.");
-    }
-    const fullPrompt = existingStory 
-        ? `Continue this children's story. Keep the tone whimsical and imaginative. Write only one or two new paragraphs. STORY SO FAR:\n\n${existingStory}\n\n CONTINUE THE STORY:`
-        : `Write the beginning of a children's story based on this prompt: "${prompt}". Keep the tone whimsical and imaginative. Write only one or two paragraphs.`;
-    
-    const response = await ai.models.generateContent({
-        model: 'gemini-2.5-pro',
-        contents: fullPrompt,
-        config: {
-            temperature: 0.8,
-            topP: 0.95,
-        }
-    });
-
-    return response.text.trim();
-}
-
-export async function generateStoryImage(textSegment: string): Promise<string> {
-    if (import.meta.env.VITE_USE_FAKE_DATA === 'true') {
-        return Promise.resolve("https://via.placeholder.com/512x384.png?text=Whimsical+Dragon");
-    }
-    const prompt = `A beautiful, whimsical, watercolor illustration for a children's storybook, depicting the following scene: ${textSegment}`;
-    
-    const response = await ai.models.generateImages({
-        model: 'imagen-4.0-generate-001',
-        prompt: prompt,
-        config: {
-          numberOfImages: 1,
-          outputMimeType: 'image/png',
-          aspectRatio: '4:3',
-        },
-    });
-
-    const base64ImageBytes = response.generatedImages[0].image.imageBytes;
-    if (!base64ImageBytes) {
-        throw new Error("Image generation failed.");
-    }
-    return `data:image/png;base64,${base64ImageBytes}`;
-}
-
-
-// --- Proactive Assistant ---
-
-const proactiveSuggestionSchema = {
-    type: Type.OBJECT,
-    properties: {
-        type: {
-            type: Type.STRING,
-            description: "The type of suggestion. Options: 'grocery', 'activity', 'event', 'none'.",
-        },
-        suggestion: {
-            type: Type.STRING,
-            description: "The text to display to the user. E.g., 'I see Taco Night on your calendar. Should I add tortillas to the grocery list?'"
-        },
-        actionableItem: {
-            type: Type.STRING,
-            description: "If applicable, the item to act on. For 'grocery', this is the item to add. For 'event', this is the event title. E.g., 'Tortillas' or 'Farmers Market'."
-        }
-    },
-    required: ["type", "suggestion"]
-};
-
-export async function getProactiveSuggestion(
-    events: CalendarEvent[],
-    groceryList: GroceryItem[],
-    weather: WeatherData
-): Promise<ProactiveSuggestion | null> {
-    if (import.meta.env.VITE_USE_FAKE_DATA === 'true') {
-        return Promise.resolve(null);
-    }
-    const relevantEvents = events.filter(e => {
-        const eventDate = new Date(e.date);
-        const today = new Date();
-        today.setHours(0,0,0,0);
-        const diffDays = (eventDate.getTime() - today.getTime()) / (1000 * 3600 * 24);
-        return diffDays >= 0 && diffDays <= 3; // Look at today and next 3 days
-    }).map(e => ({ title: e.title, date: e.date }));
-
-    const incompleteGroceries = groceryList.filter(i => !i.completed).map(i => i.name);
-    
-    // Fetch local events
-    const localEvents = await getLocalEvents(34.0522, -118.2437);
-    const upcomingLocalEvents = localEvents.filter(e => {
-        const eventDate = new Date(e.date);
-        const today = new Date();
-        today.setHours(0,0,0,0);
-        const diffDays = (eventDate.getTime() - today.getTime()) / (1000 * 3600 * 24);
-        return diffDays >= 0 && diffDays <= 2; // Look at today and next 2 days
-    });
-
-    const prompt = `
-        You are a clever and proactive home assistant for a family. Your goal is to find one helpful, non-obvious connection between the family's data to offer a suggestion.
-        Current Date: ${new Date().toDateString()}
-        Family's Calendar Events for the next few days: ${JSON.stringify(relevantEvents)}
-        Family's Current Grocery List (incomplete items): ${JSON.stringify(incompleteGroceries)}
-        Today's Weather: The forecast is ${weather.condition} with a high of ${weather.temp} degrees.
-        Upcoming Local Events: ${JSON.stringify(upcomingLocalEvents.map(e => ({ title: e.title, date: e.date, location: e.location })))}
-
-        Analyze the data and find a single suggestion. Here are some ideas:
-        - If an event looks like a meal (e.g., "Taco Night", "Pizza Party"), check the grocery list for key ingredients. If a common ingredient is missing, suggest adding it.
-        - If the weather is nice and there are no conflicting family events, suggest attending a cool local event. Frame it as a question.
-        - If the weather is rainy or stormy, suggest an indoor activity like playing a game or trying a new recipe.
-        - If a calendar event mentions a specific person (e.g., "Lunch with Bob"), it's probably not a meal to prepare for.
-
-        **IMPORTANT**:
-        - Only make ONE suggestion.
-        - Do not be repetitive.
-        - If suggesting a local event, make sure it doesn't conflict with an existing calendar event on the same day.
-        - If you cannot find a good, genuinely helpful suggestion, you MUST return 'none' for the type.
-        - Your response must be in JSON format.
-    `;
-    
-    try {
-        const response = await ai.models.generateContent({
-            model: 'gemini-2.5-flash',
-            contents: prompt,
-            config: {
-                responseMimeType: "application/json",
-                responseSchema: proactiveSuggestionSchema,
-            },
-        });
-
-        const jsonText = response.text.trim();
-        const parsed = JSON.parse(jsonText) as ProactiveSuggestion;
-
-        // Basic validation
-        if (parsed && typeof parsed.type === 'string' && typeof parsed.suggestion === 'string') {
-            if (parsed.type === 'none') {
-                return null;
-            }
-            // Ensure actionableItem exists for grocery type
-            if (parsed.type === 'grocery' && !parsed.actionableItem) {
-                console.warn("Proactive suggestion of type 'grocery' missing 'actionableItem'.");
-                return null;
-            }
-            return parsed;
-        }
-        return null;
-    } catch (error) {
-        console.error("Failed to get proactive suggestion:", error);
-        return null;
-    }
-}
+export const ai = new GoogleGenAI({ apiKey: GEMINI_API_KEY || 'mock-api-key' });
 
 // --- Hangman Game ---
 const hangmanWordSchema = {
@@ -388,18 +27,21 @@ const hangmanWordSchema = {
 };
 
 export async function getHangmanWord(): Promise<HangmanWord> {
-    if (import.meta.env.VITE_USE_FAKE_DATA === 'true') {
+    if (USE_FAKE_DATA) {
         return Promise.resolve({ word: "developer", hint: "Someone who writes code" });
     }
     const prompt = `Generate a single, moderately difficult, family-friendly English word for a game of Hangman. The word should be between 5 and 10 letters long. Also, provide a short hint for the word. Ensure the word is lowercase.`;
 
     try {
         const response = await ai.models.generateContent({
-            model: 'gemini-2.5-flash',
+            model: 'gemini-2.5-flash-lite',
             contents: prompt,
             config: {
                 responseMimeType: "application/json",
                 responseSchema: hangmanWordSchema,
+                thinkingConfig: {
+                    thinkingBudget: 24576,
+                }
             },
         });
         
@@ -416,99 +58,6 @@ export async function getHangmanWord(): Promise<HangmanWord> {
         console.error("Failed to get Hangman word from Gemini:", error);
         return { word: "hearth", hint: "The floor of a fireplace" };
     }
-}
-
-
-// --- Weather ---
-export async function getWeatherForecast(): Promise<WeatherData[]> {
-    if (import.meta.env.VITE_USE_FAKE_DATA === 'true') {
-        return Promise.resolve(MOCK_WEATHER);
-    }
-    const weatherSchema = {
-        type: Type.OBJECT,
-        properties: {
-            forecast: {
-                type: Type.ARRAY,
-                description: "An array of 7 daily weather forecast objects.",
-                items: {
-                    type: Type.OBJECT,
-                    properties: {
-                        day: { type: Type.STRING, description: "The abbreviated day of the week (e.g., 'Mon')." },
-                        temp: { type: Type.INTEGER, description: "The average temperature in Fahrenheit." },
-                        condition: {
-                            type: Type.STRING,
-                            enum: ['sunny', 'cloudy', 'rainy', 'stormy', 'partly-cloudy'],
-                            description: "The weather condition."
-                        },
-                        hourly: {
-                            type: Type.ARRAY,
-                            description: "Optional hourly forecast, only for the first day (today).",
-                            items: {
-                                type: Type.OBJECT,
-                                properties: {
-                                    time: { type: Type.STRING, description: "The time (e.g., '9 AM', '12 PM')." },
-                                    temp: { type: Type.INTEGER, description: "The temperature at that hour." },
-                                    condition: {
-                                        type: Type.STRING,
-                                        enum: ['sunny', 'cloudy', 'rainy', 'stormy', 'partly-cloudy'],
-                                        description: "The weather condition at that hour."
-                                    },
-                                },
-                                required: ["time", "temp", "condition"]
-                            }
-                        }
-                    },
-                    required: ["day", "temp", "condition"]
-                }
-            }
-        },
-        required: ["forecast"]
-    };
-
-    const today = new Date();
-    const daysOfWeek = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
-    const todayDayName = daysOfWeek[today.getDay()];
-
-    const prompt = `
-        Generate a realistic 7-day weather forecast for a generic mid-latitude city.
-        Today is ${todayDayName}. The forecast should start from today.
-        For each day, provide the abbreviated day of the week, an average temperature in Fahrenheit (e.g., between 50 and 85), and a condition from the allowed enum.
-        For the first day's forecast (today), ALSO include a simple hourly breakdown for 9 AM, 12 PM, 3 PM, and 6 PM.
-        The other six days should not have an hourly breakdown.
-        Ensure the days of the week are in the correct sequence starting from today (${todayDayName}).
-    `;
-
-    try {
-        const response = await ai.models.generateContent({
-            model: 'gemini-2.5-flash',
-            contents: prompt,
-            config: {
-                responseMimeType: "application/json",
-                responseSchema: weatherSchema,
-            },
-        });
-        
-        const jsonText = response.text.trim();
-        const parsed = JSON.parse(jsonText);
-
-        if (parsed.forecast && Array.isArray(parsed.forecast) && parsed.forecast.length > 0) {
-            return parsed.forecast;
-        }
-    } catch (error) {
-        console.error("Failed to generate weather forecast from Gemini:", error);
-        // Fallback to mock data on error
-        return [
-            { day: 'Mon', temp: 72, condition: 'sunny', hourly: [{time: '3 PM', temp: 75, condition: 'sunny'}] },
-            { day: 'Tue', temp: 68, condition: 'partly-cloudy' },
-            { day: 'Wed', temp: 65, condition: 'rainy' },
-            { day: 'Thu', temp: 70, condition: 'cloudy' },
-            { day: 'Fri', temp: 75, condition: 'sunny' },
-            { day: 'Sat', temp: 78, condition: 'sunny' },
-            { day: 'Sun', temp: 76, condition: 'partly-cloudy' },
-        ];
-    }
-
-    throw new Error("Failed to get weather data.");
 }
 
 
@@ -711,7 +260,7 @@ export const startStoryFunctionDeclaration: FunctionDeclaration = {
 
 // --- Audio Transcription ---
 export async function transcribeAudio(base64Audio: string, mimeType: string): Promise<string> {
-    if (import.meta.env.VITE_USE_FAKE_DATA === 'true') {
+    if (USE_FAKE_DATA) {
         return Promise.resolve("This is a mock transcription.");
     }
     try {
@@ -724,8 +273,13 @@ export async function transcribeAudio(base64Audio: string, mimeType: string): Pr
         const textPart = { text: "Transcribe the following audio precisely and accurately." };
 
         const response = await ai.models.generateContent({
-            model: 'gemini-2.5-flash',
+            model: 'gemini-2.5-flash-lite',
             contents: { parts: [audioPart, textPart] },
+            config: {
+                thinkingConfig: {
+                    thinkingBudget: 24576,
+                }
+            }
         });
 
         return response.text.trim();
@@ -735,10 +289,9 @@ export async function transcribeAudio(base64Audio: string, mimeType: string): Pr
     }
 }
 
-// FIX: Added missing recognizeUser function to resolve import error in UserRecognition.tsx.
 // --- User Recognition ---
 export async function recognizeUser(base64Image: string, enrolledUsers: User[]): Promise<string | null> {
-    if (import.meta.env.VITE_USE_FAKE_DATA === 'true') {
+    if (USE_FAKE_DATA) {
         return Promise.resolve(null);
     }
     if (enrolledUsers.length === 0) {
@@ -758,8 +311,13 @@ export async function recognizeUser(base64Image: string, enrolledUsers: User[]):
 
     try {
         const response = await ai.models.generateContent({
-            model: 'gemini-2.5-flash',
+            model: 'gemini-2.5-flash-lite',
             contents: { parts: [imagePart, textPart] },
+            config: {
+                thinkingConfig: {
+                    thinkingBudget: 24576,
+                }
+            }
         });
 
         const recognizedId = response.text.trim();

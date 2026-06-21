@@ -21,7 +21,7 @@ interface DayDetailViewProps {
   weather: WeatherData | null;
   onClose: () => void;
   onSelectEvent: (event: CalendarEvent) => void;
-  dinner?: string;
+  dinner?: import('../types').Recipe;
 }
 
 export const DayDetailView: React.FC<DayDetailViewProps> = ({ day, events, weather, onClose, onSelectEvent, dinner }) => {
@@ -84,10 +84,25 @@ export const DayDetailView: React.FC<DayDetailViewProps> = ({ day, events, weath
                   <button 
                     key={event.id}
                     onClick={() => onSelectEvent(event)}
-                    className={`w-full text-left p-3 rounded-lg text-white ${event.color} transition-transform hover:scale-105`}
+                    className={`w-full text-left p-3 rounded-lg text-white transition-transform hover:scale-105 shadow-sm border-l-4 border-white/40 ${!event.color.startsWith('#') ? event.color : ''}`}
+                    style={event.color.startsWith('#') ? { backgroundColor: event.color } : {}}
                   >
-                    <p className="font-bold">{event.title}</p>
-                    <p className="text-sm opacity-90">{event.time}</p>
+                    <div className="flex justify-between items-start">
+                        <div>
+                            <p className="font-bold text-lg">{event.title}</p>
+                            <p className="text-sm opacity-90 font-medium">{event.time}</p>
+                        </div>
+                        {event.calendarName && (
+                            <span className="text-xs bg-black/20 px-2 py-1 rounded-full font-medium backdrop-blur-sm">
+                                {event.calendarName}
+                            </span>
+                        )}
+                    </div>
+                    {event.participants && event.participants.length > 0 && (
+                        <p className="text-xs opacity-90 mt-2 truncate font-medium bg-black/10 p-1 rounded">
+                            👥 {event.participants.join(', ')}
+                        </p>
+                    )}
                   </button>
                 ))
               ) : (
@@ -100,7 +115,7 @@ export const DayDetailView: React.FC<DayDetailViewProps> = ({ day, events, weath
                     <ChefHatIcon className="w-5 h-5" /> Dinner
                 </h4>
                 <div className="p-3 rounded-lg bg-teal-50 text-teal-800">
-                  <p className="font-bold">{dinner}</p>
+                  <p className="font-bold">{dinner.recipeName}</p>
                 </div>
               </div>
             )}

@@ -6,6 +6,13 @@ export default defineConfig({
   server: {
     port: 3000,
     host: '0.0.0.0',
+    proxy: {
+      '/api/serp': {
+        target: 'https://serpapi.com',
+        changeOrigin: true,
+        rewrite: (path) => path.replace(/^\/api\/serp/, ''),
+      },
+    },
   },
   plugins: [react()],
   resolve: {

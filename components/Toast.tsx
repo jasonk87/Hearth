@@ -53,17 +53,29 @@ const Toast: React.FC<ToastProps> = ({ toast, onRemove }) => {
 
 export const ToastProvider: React.FC<{ children: ReactNode }> = ({ children }) => {
   const [toasts, setToasts] = useState<ToastMessage[]>([]);
+  const recentToasts = React.useRef<Set<string>>(new Set());
 
   const showToast = useCallback((message: string, type: 'success' | 'error' = 'success') => {
+    // Deduplicate: ignore if the exact same message is already queued
+    if (recentToasts.current.has(message)) {
+        return;
+    }
+    recentToasts.current.add(message);
+
     if (type === 'success') {
       playSound('success');
     }
     const newToast: ToastMessage = {
-      id: Date.now(),
+      id: Date.now() + Math.random(),
       message,
       type,
     };
     setToasts(currentToasts => [newToast, ...currentToasts].slice(0, 3)); // Show max 3 toasts
+
+    // Remove from the recent set after the toast auto-dismisses
+    setTimeout(() => {
+        recentToasts.current.delete(message);
+    }, 5000);
   }, []);
 
   const removeToast = useCallback((id: number) => {

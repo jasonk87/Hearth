@@ -17,9 +17,11 @@ export interface CalendarEvent {
   time: string;
   title: string;
   color: string; // Maintained for background, but border will indicate owner
-  source: CalendarSource;
+  source: CalendarSource | 'google';
   participants?: string[];
   date: string; // YYYY-MM-DD
+  calendarName?: string;
+  creatorEmail?: string;
 }
 
 export interface WeatherData {
@@ -55,10 +57,15 @@ export interface ProactiveSuggestion {
 }
 
 export interface Recipe {
+  id?: string | number;
   recipeName: string;
   description: string;
   ingredients: string[];
   instructions: string[];
+  imageUrl?: string;
+  videoUrl?: string;
+  category?: string;
+  prepTime?: string;
 }
 
 export interface StoryPage {
@@ -123,11 +130,19 @@ export interface GoogleCalendarEvent {
   id: string;
   summary: string;
   start: {
-    dateTime: string;
+    dateTime?: string;
+    date?: string;
   };
   attendees?: {
     email: string;
+    displayName?: string;
   }[];
+  backgroundColor?: string;
+  calendarName?: string;
+  creator?: {
+    email: string;
+    displayName?: string;
+  };
 }
 
 export interface LocalEvent {
