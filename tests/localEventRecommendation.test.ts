@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { LocalEvent, LocalEventPreferences } from '../types';
-import { isLaterToday, nearestWeekendDateKeys, scoreLocalEvent } from '../services/localEventRecommendationService';
+import { isLaterToday, isThisWeekend, nearestWeekendDateKeys, scoreLocalEvent } from '../services/localEventRecommendationService';
 
 const preferences: LocalEventPreferences = { radius: 50, reactions: {}, seen: [] };
 const event: LocalEvent = {
@@ -40,5 +40,12 @@ describe('Hearth event scoring', () => {
     expect(isLaterToday(todayEvent, now)).toBe(true);
     expect(isLaterToday(pastEvent, now)).toBe(false);
     expect(nearestWeekendDateKeys(now)).toEqual({ saturday: '2026-09-05', sunday: '2026-09-06' });
+  });
+
+  it('keeps Sunday in the active weekend instead of jumping to the following week', () => {
+    const sundayMorning = new Date(2026, 8, 6, 9);
+    expect(nearestWeekendDateKeys(sundayMorning)).toEqual({ saturday: '', sunday: '2026-09-06' });
+    expect(isThisWeekend('2026-09-06', sundayMorning)).toBe(true);
+    expect(isThisWeekend('2026-09-12', sundayMorning)).toBe(false);
   });
 });

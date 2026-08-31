@@ -84,6 +84,8 @@ export const formatEventDate = (dateKey: string): string => {
 export const isThisWeekend = (dateKey: string, now: Date = new Date()) => {
   const offset = daysFromToday(dateKey, now);
   if (offset === null || offset < 0) return false;
+  // On Sunday, the remaining portion of this weekend is today—not next week.
+  if (now.getDay() === 0) return offset === 0;
   const thisSaturdayOffset = (6 - now.getDay() + 7) % 7;
   return offset >= thisSaturdayOffset && offset <= thisSaturdayOffset + 1;
 };
@@ -95,6 +97,9 @@ export const isLaterToday = (event: LocalEvent, now: Date = new Date()) => {
 };
 
 export const nearestWeekendDateKeys = (now: Date = new Date()) => {
+  if (now.getDay() === 0) {
+    return { saturday: '', sunday: toLocalDateKey(now) };
+  }
   const saturday = new Date(now.getFullYear(), now.getMonth(), now.getDate());
   saturday.setDate(saturday.getDate() + ((6 - saturday.getDay() + 7) % 7));
   const sunday = new Date(saturday);
