@@ -1,5 +1,5 @@
 import type { CalendarEvent, LocalEvent, LocalEventPreferences, WeatherData } from '../types';
-import { daysFromToday } from './dateService';
+import { daysFromToday, toLocalDateKey } from './dateService';
 
 export interface EventRecommendation {
   event: LocalEvent;
@@ -86,4 +86,18 @@ export const isThisWeekend = (dateKey: string, now: Date = new Date()) => {
   if (offset === null || offset < 0) return false;
   const thisSaturdayOffset = (6 - now.getDay() + 7) % 7;
   return offset >= thisSaturdayOffset && offset <= thisSaturdayOffset + 1;
+};
+
+export const isLaterToday = (event: LocalEvent, now: Date = new Date()) => {
+  if (daysFromToday(event.date, now) !== 0) return false;
+  const startsAt = eventMinutes(event.time);
+  return startsAt === null || startsAt >= now.getHours() * 60 + now.getMinutes();
+};
+
+export const nearestWeekendDateKeys = (now: Date = new Date()) => {
+  const saturday = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+  saturday.setDate(saturday.getDate() + ((6 - saturday.getDay() + 7) % 7));
+  const sunday = new Date(saturday);
+  sunday.setDate(sunday.getDate() + 1);
+  return { saturday: toLocalDateKey(saturday), sunday: toLocalDateKey(sunday) };
 };

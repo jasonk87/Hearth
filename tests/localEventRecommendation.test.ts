@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { LocalEvent, LocalEventPreferences } from '../types';
-import { scoreLocalEvent } from '../services/localEventRecommendationService';
+import { isLaterToday, nearestWeekendDateKeys, scoreLocalEvent } from '../services/localEventRecommendationService';
 
 const preferences: LocalEventPreferences = { radius: 50, reactions: {}, seen: [] };
 const event: LocalEvent = {
@@ -31,5 +31,14 @@ describe('Hearth event scoring', () => {
     expect(recommendation.score).toBeLessThan(80);
     expect(recommendation.hasConflict).toBe(true);
     expect(recommendation.reasons).toContain('Calendar conflict');
+  });
+
+  it('keeps Tonight limited to events that have not started and finds the nearest weekend', () => {
+    const todayEvent = { ...event, date: '2026-09-04', time: '8:00 PM' };
+    const pastEvent = { ...event, date: '2026-09-04', time: '8:00 AM' };
+    const now = new Date(2026, 8, 4, 9, 30);
+    expect(isLaterToday(todayEvent, now)).toBe(true);
+    expect(isLaterToday(pastEvent, now)).toBe(false);
+    expect(nearestWeekendDateKeys(now)).toEqual({ saturday: '2026-09-05', sunday: '2026-09-06' });
   });
 });

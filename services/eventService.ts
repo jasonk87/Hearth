@@ -5,6 +5,11 @@ const USE_FAKE_DATA = import.meta.env.VITE_USE_FAKE_DATA === 'true';
 const CACHE_KEY = 'hearth-local-event-discovery-v2';
 const CACHE_DURATION_MS = 15 * 60 * 1000;
 
+export interface LocalEventDiscovery {
+  events: LocalEvent[];
+  error?: string;
+}
+
 const categoriesFor = (title: string, description: string): LocalEventCategory[] => {
   const text = `${title} ${description}`.toLowerCase();
   const categories: LocalEventCategory[] = [];
@@ -83,10 +88,10 @@ const storeEvents = (location: string, radius: number, events: LocalEvent[]) => 
   }
 };
 
-export const getLocalEvents = async (locationQuery: string, radius = 50): Promise<LocalEvent[]> => {
-  if (USE_FAKE_DATA) return fallbackEvents();
+export const getLocalEventDiscovery = async (locationQuery: string, radius = 50): Promise<LocalEventDiscovery> => {
+  if (USE_FAKE_DATA) return { events: fallbackEvents() };
   const cached = cachedEvents(locationQuery, radius);
-  if (cached) return cached;
+  if (cached) return { events: cached };
 
   try {
     const area = `within ${radius} miles of ${locationQuery}`;
@@ -101,12 +106,18 @@ export const getLocalEvents = async (locationQuery: string, radius = 50): Promis
       `things to do this weekend ${area}`,
     ];
     const resultsArray = await Promise.all(searchQueries.map(async query => {
-      const response = await fetch(`/api/serp/search.json?engine=google_events&q=${encodeURIComponent(query)}&htichips=date:next_month`);
-      return response.ok ? (await response.json()).events_results || [] : [];
+      try {
+        const response = await fetch(`/api/serp/search.json?engine=google_events&q=${encodeURIComponent(query)}&htichips=date:next_month`);
+        return response.ok ? (await response.json()).events_results || [] : null;
+      } catch {
+        return null;
+      }
     }));
+    const successfulResults = resultsArray.filter((result): result is any[] => result !== null);
+    if (!successfulResults.length) return { events: [], error: 'Couldn’t reach event sources right now. Try again in a moment.' };
 
     const deduplicated = new Map<string, any>();
-    resultsArray.flat().forEach((event: any) => {
+    successfulResults.flat().forEach((event: any) => {
       const date = normalizeEventDate(event.date?.start_date || '');
       const location = event.address?.join(', ') || event.venue?.name || locationQuery;
       if (date) deduplicated.set(fingerprint(event.title || 'event', date, location), event);
@@ -138,10 +149,15 @@ export const getLocalEvents = async (locationQuery: string, radius = 50): Promis
 
     if (events.length) {
       storeEvents(locationQuery, radius, events);
-      return events;
+      return { events };
     }
+    return { events: [] };
   } catch (error) {
     console.error('Failed to fetch local events via SerpApi:', error);
+    return { events: [], error: 'Couldn’t reach event sources right now. Try again in a moment.' };
   }
-  return fallbackEvents();
 };
+
+/** Compatibility helper for non-UI consumers such as proactive suggestions. */
+export const getLocalEvents = async (locationQuery: string, radius = 50): Promise<LocalEvent[]> =>
+  (await getLocalEventDiscovery(locationQuery, radius)).events;

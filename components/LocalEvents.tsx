@@ -1,7 +1,7 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { getLocalEvents } from '../services/eventService';
+import { getLocalEventDiscovery } from '../services/eventService';
 import { daysFromToday } from '../services/dateService';
-import { formatEventDate, isThisWeekend, scoreLocalEvent, type EventRecommendation } from '../services/localEventRecommendationService';
+import { formatEventDate, isLaterToday, isThisWeekend, nearestWeekendDateKeys, scoreLocalEvent, type EventRecommendation } from '../services/localEventRecommendationService';
 import type { LocalEvent, LocalEventCategory, LocalEventReaction } from '../types';
 import { Loader } from './Loader';
 import { CalendarPlusIcon, HeartIcon, MapPinIcon, SearchIcon, TicketIcon } from './icons';
@@ -73,10 +73,11 @@ const RecommendationSection: React.FC<{ title: string; events: EventRecommendati
 export const LocalEvents: React.FC<{ onAddCalendarEvent: (title: string, date: string, time: string) => void }> = ({ onAddCalendarEvent }) => {
   const [events, setEvents] = useState<LocalEvent[]>([]);
   const [loading, setLoading] = useState(true);
+  const [discoveryError, setDiscoveryError] = useState<string | null>(null);
   const [selected, setSelected] = useState<EventRecommendation | null>(null);
   const [isEditingLocation, setIsEditingLocation] = useState(false);
   const [tempLocation, setTempLocation] = useState('');
-  const [activeFilter, setActiveFilter] = useState<EventFilter | null>('weekend');
+  const [activeFilter, setActiveFilter] = useState<EventFilter | null>(null);
   const { state: persistentState, setField } = usePersistentState();
   const { events: calendarEvents, weatherData } = useCalendar();
   const location = persistentState.location;
@@ -86,9 +87,9 @@ export const LocalEvents: React.FC<{ onAddCalendarEvent: (title: string, date: s
     if (!location) return;
     let active = true;
     setLoading(true);
-    getLocalEvents(location, preferences.radius)
-      .then(fetched => { if (active) setEvents(fetched); })
-      .catch(error => console.error('Unable to load local events:', error))
+    getLocalEventDiscovery(location, preferences.radius)
+      .then(result => { if (active) { setEvents(result.events); setDiscoveryError(result.error || null); } })
+      .catch(error => { console.error('Unable to load local events:', error); if (active) setDiscoveryError('Couldn’t reach event sources right now. Try again in a moment.'); })
       .finally(() => { if (active) setLoading(false); });
     return () => { active = false; };
   }, [location, preferences.radius]);
@@ -130,9 +131,10 @@ export const LocalEvents: React.FC<{ onAddCalendarEvent: (title: string, date: s
     setIsEditingLocation(false);
   };
 
-  const today = recommendations.filter(item => daysFromToday(item.event.date) === 0).slice(0, 6);
-  const saturday = recommendations.filter(item => new Date(`${item.event.date}T12:00:00`).getDay() === 6).slice(0, 6);
-  const sunday = recommendations.filter(item => new Date(`${item.event.date}T12:00:00`).getDay() === 0).slice(0, 6);
+  const today = recommendations.filter(item => isLaterToday(item.event)).slice(0, 6);
+  const nearestWeekend = nearestWeekendDateKeys();
+  const saturday = recommendations.filter(item => item.event.date === nearestWeekend.saturday).slice(0, 6);
+  const sunday = recommendations.filter(item => item.event.date === nearestWeekend.sunday).slice(0, 6);
 
   if (loading) return <Loader message="Finding the best things to do nearby..." />;
 
@@ -141,7 +143,7 @@ export const LocalEvents: React.FC<{ onAddCalendarEvent: (title: string, date: s
       <header className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
         <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
           <div>
-            <p className="flex items-center gap-2 text-lg font-extrabold text-slate-800"><MapPinIcon className="h-5 w-5 text-teal-600" /> {location || 'Set your location'} <span className="font-medium text-slate-400">· within {preferences.radius} miles</span></p>
+            <p className="flex items-center gap-2 text-lg font-extrabold text-slate-800"><MapPinIcon className="h-5 w-5 text-teal-600" /> {location || 'Set your location'} <span className="font-medium text-slate-400">· search area: {preferences.radius} mi</span></p>
             <button onClick={() => { setTempLocation(location); setIsEditingLocation(true); }} className="mt-1 text-sm font-semibold text-teal-600 hover:text-teal-700">Change location</button>
           </div>
           <div className="flex flex-wrap gap-2">
@@ -167,7 +169,7 @@ export const LocalEvents: React.FC<{ onAddCalendarEvent: (title: string, date: s
           <RecommendationSection title="Sunday" events={sunday} onSelect={selectRecommendation} />
           <RecommendationSection title="Worth exploring" events={recommendations.filter(item => !today.includes(item) && !saturday.includes(item) && !sunday.includes(item)).slice(0, 6)} onSelect={selectRecommendation} />
         </>}
-        {!recommendations.length && <div className="rounded-2xl border border-slate-200 bg-white p-12 text-center text-slate-500">No nearby events matched your preferences. Try a wider radius.</div>}
+        {!recommendations.length && <div className="rounded-2xl border border-slate-200 bg-white p-12 text-center text-slate-500">{discoveryError || 'No nearby events matched your preferences. Try a wider search area.'}</div>}
       </>}
 
       {selected && <EventDetailModal event={selected.event} recommendation={selected} reaction={preferences.reactions[selected.event.id]} onClose={() => setSelected(null)} onReaction={setReaction} onAddEvent={event => onAddCalendarEvent(event.title, event.date, event.time)} />}
