@@ -5,11 +5,11 @@ import { playSound } from '../services/soundService';
 interface ToastMessage {
   id: number;
   message: string;
-  type: 'success' | 'error';
+  type: 'success' | 'error' | 'info';
 }
 
 interface ToastContextType {
-  showToast: (message: string, type: 'success' | 'error') => void;
+  showToast: (message: string, type?: ToastMessage['type']) => void;
 }
 
 const ToastContext = createContext<ToastContextType | null>(null);
@@ -38,7 +38,9 @@ const Toast: React.FC<ToastProps> = ({ toast, onRemove }) => {
         };
     }, [toast.id, onRemove]);
 
-    const bgColor = toast.type === 'success' ? 'bg-green-600/90 border-green-500' : 'bg-red-600/90 border-red-500';
+    const bgColor = toast.type === 'success'
+      ? 'bg-green-600/90 border-green-500'
+      : toast.type === 'info' ? 'bg-blue-600/90 border-blue-500' : 'bg-red-600/90 border-red-500';
     
     return (
         <div className={`toast-enter-exit flex items-center justify-between w-full max-w-sm p-4 text-white rounded-lg shadow-lg ${bgColor} border backdrop-blur-sm`}>
@@ -53,17 +55,29 @@ const Toast: React.FC<ToastProps> = ({ toast, onRemove }) => {
 
 export const ToastProvider: React.FC<{ children: ReactNode }> = ({ children }) => {
   const [toasts, setToasts] = useState<ToastMessage[]>([]);
+  const recentToasts = React.useRef<Set<string>>(new Set());
 
-  const showToast = useCallback((message: string, type: 'success' | 'error' = 'success') => {
+  const showToast = useCallback((message: string, type: ToastMessage['type'] = 'success') => {
+    // Deduplicate: ignore if the exact same message is already queued
+    if (recentToasts.current.has(message)) {
+        return;
+    }
+    recentToasts.current.add(message);
+
     if (type === 'success') {
       playSound('success');
     }
     const newToast: ToastMessage = {
-      id: Date.now(),
+      id: Date.now() + Math.random(),
       message,
       type,
     };
     setToasts(currentToasts => [newToast, ...currentToasts].slice(0, 3)); // Show max 3 toasts
+
+    // Remove from the recent set after the toast auto-dismisses
+    setTimeout(() => {
+        recentToasts.current.delete(message);
+    }, 5000);
   }, []);
 
   const removeToast = useCallback((id: number) => {

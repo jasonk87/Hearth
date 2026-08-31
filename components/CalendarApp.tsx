@@ -2,6 +2,7 @@
 
 import React, { useState, useMemo } from 'react';
 import type { CalendarEvent, WeatherData, CalendarSource, User } from '../types';
+import { toLocalDateKey } from '../services/dateService';
 import { SunIcon, CloudIcon, CloudRainIcon, CloudLightningIcon, CloudSunIcon, ChevronLeftIcon, ChevronRightIcon } from './icons';
 
 const WeatherIcon: React.FC<{ condition: WeatherData['condition']; className?: string }> = ({ condition, className }) => {
@@ -28,6 +29,7 @@ export const CalendarApp: React.FC<CalendarAppProps> = ({ eventsBySource, weathe
     
     // In this view, we'll just show the events passed in (already filtered by App.tsx)
     const visibleEvents = eventsBySource;
+    console.log("HEARTH DEBUG: CalendarApp rendered with visibleEvents keys:", Object.keys(visibleEvents));
 
     const handlePrevMonth = () => setCurrentDate(new Date(currentDate.getFullYear(), currentDate.getMonth() - 1, 1));
     const handleNextMonth = () => setCurrentDate(new Date(currentDate.getFullYear(), currentDate.getMonth() + 1, 1));
@@ -46,7 +48,7 @@ export const CalendarApp: React.FC<CalendarAppProps> = ({ eventsBySource, weathe
     for (let i = 1; i <= totalDays; i++) { days.push(new Date(year, month, i)); }
 
     const today = new Date();
-    const todayKey = today.toISOString().split('T')[0];
+    const todayKey = toLocalDateKey(today);
 
     return (
         <div className="flex flex-col h-full relative text-slate-700">
@@ -65,7 +67,7 @@ export const CalendarApp: React.FC<CalendarAppProps> = ({ eventsBySource, weathe
                 {days.map((day, index) => {
                     if (!day) return <div key={`empty-${index}`} className="rounded-lg bg-slate-100/40"></div>;
                     
-                    const dayKey = day.toISOString().split('T')[0];
+                    const dayKey = toLocalDateKey(day);
                     const isToday = dayKey === todayKey;
                     const dayEvents = visibleEvents[dayKey] || [];
                     
@@ -76,9 +78,9 @@ export const CalendarApp: React.FC<CalendarAppProps> = ({ eventsBySource, weathe
                         <div 
                             key={dayKey} 
                             onClick={() => onSelectDay(day)}
-                            className={`rounded-lg p-2 flex flex-col bg-slate-50/50 cursor-pointer transition-all hover:bg-white/70 ${isToday ? 'border-2 border-teal-500' : 'border border-transparent'}`}
+                            className={`min-h-0 rounded-lg p-2 flex flex-col bg-slate-50/50 cursor-pointer transition-all hover:bg-white/70 ${isToday ? 'border-2 border-teal-500' : 'border border-transparent'}`}
                         >
-                            <div className="flex justify-between items-center">
+                            <div className="flex justify-between items-center flex-shrink-0">
                                 <p className={`font-bold ${isToday ? 'text-teal-600' : 'text-slate-800'}`}>{day.getDate()}</p>
                                 {weather && (
                                     <div className="flex items-center space-x-1 text-xs">
@@ -87,14 +89,16 @@ export const CalendarApp: React.FC<CalendarAppProps> = ({ eventsBySource, weathe
                                     </div>
                                 )}
                             </div>
-                            <div className="mt-1 space-y-1 flex-grow overflow-y-auto text-xs pr-1">
+                            <div className="mt-1 space-y-1 flex-grow overflow-y-auto text-xs pr-1 min-h-0">
                                 {dayEvents.map((event) => {
+                                    const isHex = event.color.startsWith('#');
                                     return (
                                         <div 
                                             key={event.id} 
                                             onClick={(e) => { e.stopPropagation(); onSelectEvent(event); }}
-                                            className={`p-1 rounded text-white truncate ${event.color} border-l-2 border-green-500`}
-                                            title={`${event.title} (Family)`}
+                                            className={`p-1 rounded text-white truncate border-l-2 border-white/40 shadow-sm ${!isHex ? event.color : ''}`}
+                                            style={isHex ? { backgroundColor: event.color } : {}}
+                                            title={`${event.title}\nCalendar: ${event.calendarName || 'Local'}${event.creatorEmail ? `\nCreated by: ${event.creatorEmail}` : ''}`}
                                         >
                                             {event.title}
                                         </div>

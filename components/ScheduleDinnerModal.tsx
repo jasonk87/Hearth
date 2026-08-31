@@ -1,6 +1,7 @@
 
 import React from 'react';
 import { XIcon } from './icons';
+import { toLocalDateKey } from '../services/dateService';
 
 interface ScheduleDinnerModalProps {
   isOpen: boolean;
@@ -26,7 +27,7 @@ export const ScheduleDinnerModal: React.FC<ScheduleDinnerModalProps> = ({ isOpen
   const days = getNextDays(7);
 
   const handleDaySelect = (day: Date) => {
-    const dayKey = day.toISOString().split('T')[0];
+    const dayKey = toLocalDateKey(day);
     onSchedule(dayKey, recipeName);
   };
 

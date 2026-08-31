@@ -13,13 +13,15 @@ export interface User {
 }
 
 export interface CalendarEvent {
-  id: number;
+  id: number | string;
   time: string;
   title: string;
   color: string; // Maintained for background, but border will indicate owner
-  source: CalendarSource;
+  source: CalendarSource | 'google';
   participants?: string[];
   date: string; // YYYY-MM-DD
+  calendarName?: string;
+  creatorEmail?: string;
 }
 
 export interface WeatherData {
@@ -49,16 +51,21 @@ export interface Note {
 }
 
 export interface ProactiveSuggestion {
-  type: 'grocery' | 'activity' | 'none';
+  type: 'grocery' | 'activity' | 'event' | 'none';
   suggestion: string;
   actionableItem?: string;
 }
 
 export interface Recipe {
+  id: string;
   recipeName: string;
   description: string;
   ingredients: string[];
   instructions: string[];
+  imageUrl?: string;
+  videoUrl?: string;
+  category?: string;
+  prepTime?: string;
 }
 
 export interface StoryPage {
@@ -112,4 +119,55 @@ export interface Thermostat {
 export interface SmartHomeState {
   lights: Record<string, Light>;
   thermostat: Thermostat;
+}
+
+export interface GoogleProfile {
+  name: string;
+  picture: string;
+  email?: string;
+}
+
+export interface GoogleCalendarEvent {
+  id: string;
+  summary: string;
+  start: {
+    dateTime?: string;
+    date?: string;
+  };
+  attendees?: {
+    email: string;
+    displayName?: string;
+  }[];
+  backgroundColor?: string;
+  calendarName?: string;
+  creator?: {
+    email: string;
+    displayName?: string;
+  };
+}
+
+export type LocalEventCategory = 'family' | 'music' | 'sports' | 'festival' | 'food' | 'outdoors' | 'other';
+export type LocalEventReaction = 'interested' | 'going' | 'notInterested';
+
+export interface LocalEventPreferences {
+  radius: 25 | 50 | 75 | 100;
+  reactions: Record<string, LocalEventReaction>;
+  seen: string[];
+}
+
+export interface LocalEvent {
+  id: string;
+  title: string;
+  date: string; // YYYY-MM-DD
+  time: string;
+  location: string;
+  description: string;
+  imageUrl?: string;
+  venue?: string;
+  sourceUrl?: string;
+  ticketUrl?: string;
+  price?: string;
+  distanceMiles?: number;
+  categories: LocalEventCategory[];
+  isOutdoor?: boolean;
 }

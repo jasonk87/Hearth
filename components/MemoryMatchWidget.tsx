@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { RefreshCwIcon } from './icons';
 
 const EMOJIS = ['🧠', '🕹️', '🎲', '🧩', '🎯', '🚀', '⭐', '💡'];
@@ -14,6 +14,7 @@ export const MemoryMatchWidget: React.FC = () => {
   const [cards, setCards] = useState(generateCards());
   const [flippedIndices, setFlippedIndices] = useState<number[]>([]);
   const [moves, setMoves] = useState(0);
+  const resetTimer = useRef<number | null>(null);
 
   const isGameWon = cards.every(card => card.isMatched);
 
@@ -27,23 +28,27 @@ export const MemoryMatchWidget: React.FC = () => {
         // Match
         setCards(prevCards =>
           prevCards.map(card =>
-            card.emoji === firstCard.emoji ? { ...card, isMatched: true } : card
+            card.id === firstCard.id || card.id === secondCard.id ? { ...card, isMatched: true } : card
           )
         );
+        setFlippedIndices([]);
       } else {
         // No match, flip back after a delay
-        setTimeout(() => {
+        resetTimer.current = window.setTimeout(() => {
           setCards(prevCards =>
             prevCards.map((card, index) =>
               index === firstIndex || index === secondIndex ? { ...card, isFlipped: false } : card
             )
           );
+          setFlippedIndices([]);
         }, 1000);
       }
-      // Reset flipped cards for next turn
-      setTimeout(() => setFlippedIndices([]), 1000);
     }
-  }, [flippedIndices, cards]);
+  }, [flippedIndices]);
+
+  useEffect(() => () => {
+    if (resetTimer.current !== null) window.clearTimeout(resetTimer.current);
+  }, []);
 
   const handleCardClick = (index: number) => {
     if (flippedIndices.length >= 2 || cards[index].isFlipped) {
@@ -58,6 +63,8 @@ export const MemoryMatchWidget: React.FC = () => {
   };
 
   const resetGame = () => {
+    if (resetTimer.current !== null) window.clearTimeout(resetTimer.current);
+    resetTimer.current = null;
     setCards(generateCards());
     setFlippedIndices([]);
     setMoves(0);

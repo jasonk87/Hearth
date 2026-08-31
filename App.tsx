@@ -2,7 +2,7 @@
 import React, { useState, useCallback, useMemo, useEffect, useRef } from 'react';
 import { VoiceAssistant } from './components/VoiceAssistant';
 import OnScreenKeyboard from './components/OnScreenKeyboard';
-import type { CalendarEvent, WeatherData, GroceryItem, CalendarSource, Game, Note, NoteColor, User, Recipe, ProactiveSuggestion, ChatMessage, StoryPage } from './types';
+import type { CalendarEvent, WeatherData, GroceryItem, CalendarSource, Game, Note, NoteColor, User, Recipe, ProactiveSuggestion, ChatMessage, StoryPage, GoogleProfile, GoogleCalendarEvent } from './types';
 import { CalendarApp } from './components/CalendarApp';
 import { GamesApp } from './components/GamesApp';
 import { NotesApp } from './components/NotesApp';
@@ -14,13 +14,30 @@ import { SeasonalBackground } from './components/SeasonalBackground';
 import { initAudioOnInteraction, playSound } from './services/soundService';
 import { RecipesApp } from './components/RecipesApp';
 import { RecipeDetailView } from './components/RecipeDetailView';
-import { getProactiveSuggestion, getPersonalizedRecipes, searchRecipes, generateDailyBriefing, generateStorySegment, generateStoryImage, getWeatherForecast } from './services/geminiService';
+import { getProactiveSuggestion } from './services/proactiveService';
+import { getPersonalizedRecipes, searchRecipes } from './services/recipeService';
+import { generateDailyBriefing } from './services/briefingService';
+import { generateStorySegment, generateStoryImage } from './services/storyService';
+import { getWeatherForecast } from './services/weatherService';
+import { NotesProvider, useNotes } from './contexts/NotesContext';
+import { GroceryProvider, useGroceries } from './contexts/GroceryContext';
+import { CalendarProvider, useCalendar } from './contexts/CalendarContext';
+import { RecipeProvider } from './contexts/RecipeContext';
+import { USE_FAKE_DATA } from './services/geminiService';
+import { setAccessToken, logout, getProfile, getAccessToken, getCalendarEvents, setCalendarAccount } from './services/authService';
+import { toLocalDateKey } from './services/dateService';
+import GoogleAuth from './components/GoogleAuth';
 import { DailyBriefing } from './components/DailyBriefing';
 import { Loader } from './components/Loader';
 import { ProactiveSuggestionBanner } from './components/ProactiveSuggestionBanner';
 import { ScheduleDinnerModal } from './components/ScheduleDinnerModal';
 import { AiChatModal } from './components/AiChatModal';
-import { HomeIcon, NotebookTextIcon, ShoppingCartIcon, ChefHatIcon, Gamepad2Icon } from './components/icons';
+import { PersistentStateProvider, usePersistentState } from './contexts/PersistentStateContext';
+import { HomeIcon, NotebookTextIcon, ShoppingCartIcon, ChefHatIcon, Gamepad2Icon, CalendarPlusIcon, TicketIcon } from './components/icons';
+import { MealPlannerApp } from './components/MealPlannerApp';
+import { LocalEvents } from './components/LocalEvents';
+import { DndProvider } from 'react-dnd';
+import { HTML5Backend } from 'react-dnd-html5-backend';
 
 type ActiveInput = {
   key: string;
@@ -28,32 +45,8 @@ type ActiveInput = {
   setValue: (value: string) => void;
 } | null;
 
-export type ModalType = 'calendar' | 'games' | 'notes' | 'grocery' | 'recipes';
+export type ModalType = 'calendar' | 'games' | 'notes' | 'grocery' | 'recipes' | 'mealPlanner' | 'events';
 
-const today = new Date();
-const todayKey = today.toISOString().split('T')[0];
-const dayAfterTomorrow = new Date(today);
-dayAfterTomorrow.setDate(today.getDate() + 2);
-const dayAfterTomorrowKey = dayAfterTomorrow.toISOString().split('T')[0];
-const nextWeek = new Date(today);
-nextWeek.setDate(today.getDate() + 5);
-const nextWeekKey = nextWeek.toISOString().split('T')[0];
-
-const FAMILY_USER: User = { id: 'family', name: 'Family', avatar: '👨‍👩‍👧‍👦', color: 'border-green-500' };
-
-const initialEvents: CalendarEvent[] = [
-    { id: 1, time: '10:00 AM', title: 'Team Standup', color: 'bg-blue-500', source: 'family', participants: ['Alice', 'Bob'], date: todayKey },
-    { id: 2, time: '2:00 PM', title: 'Doctor Appointment', color: 'bg-red-500', source: 'family', participants: [], date: dayAfterTomorrowKey },
-    { id: 3, time: '6:00 PM', title: 'Soccer Practice', color: 'bg-green-500', source: 'family', participants: ['Alex'], date: todayKey },
-    { id: 4, time: '12:00 PM', title: 'Lunch', color: 'bg-purple-500', source: 'family', participants: ['Mom', 'Dad', 'Alex', 'Chloe'], date: nextWeekKey },
-    { id: 5, time: '9:00 AM', title: 'School Assembly', color: 'bg-yellow-500', source: 'family', participants: [], date: dayAfterTomorrowKey },
-];
-
-const initialNotes: Note[] = [
-    { id: 1, text: 'Grocery List:\n- Milk\n- Bread\n- Eggs', color: 'yellow' },
-    { id: 2, text: 'Call plumber about leaky faucet in the kitchen.', color: 'pink' },
-    { id: 3, text: 'Soccer practice for Jamie is at 6 PM on Friday.', color: 'blue' },
-];
 
 // --- Sidebar Components ---
 const SidebarItem: React.FC<{
@@ -86,6 +79,8 @@ const Sidebar: React.FC<{
     { view: 'notes', label: 'Notes', icon: <NotebookTextIcon className="w-7 h-7" /> },
     { view: 'grocery', label: 'Grocery', icon: <ShoppingCartIcon className="w-7 h-7" /> },
     { view: 'recipes', label: 'Recipes', icon: <ChefHatIcon className="w-7 h-7" /> },
+    { view: 'mealPlanner', label: 'Meal Plan', icon: <CalendarPlusIcon className="w-7 h-7" /> },
+    { view: 'events', label: 'Events', icon: <TicketIcon className="w-7 h-7" /> },
     { view: 'games', label: 'Games', icon: <Gamepad2Icon className="w-7 h-7" /> },
   ];
 
@@ -106,25 +101,17 @@ const Sidebar: React.FC<{
 };
 
 
+const FAMILY_USER: User = { id: 'family', name: 'Family', avatar: '👨‍👩‍👧‍👦', color: 'border-green-500' };
+
 function AppContent() {
-  const [notes, setNotes] = useState<Note[]>(() => {
-    const savedNotes = localStorage.getItem('hearth-notes');
-    try {
-        return savedNotes ? JSON.parse(savedNotes) : initialNotes;
-    } catch {
-        return initialNotes;
-    }
-  });
+  const { state: persistentState, setField: setPersistentField } = usePersistentState();
+  const { notes, addNote, updateNote, deleteNote, changeNoteColor } = useNotes();
+  const { groceryList, addGroceryItem, toggleGroceryItem, renameGroceryItem, removeGroceryItem, clearCompletedGroceries, addFromRecipe } = useGroceries();
+  const { events, setEvents, weatherData, weatherStatus, dinnerPlan, addCalendarEvent, editCalendarEvent, deleteCalendarEvent, setDinnerForDay, eventsByDate, eventsBySourceAndDate } = useCalendar();
+
   const [activeInput, setActiveInput] = useState<ActiveInput>(null);
-  const [events, setEvents] = useState<CalendarEvent[]>(initialEvents);
   const [activeView, setActiveView] = useState<ModalType | null>(null);
-  const [groceryList, setGroceryList] = useState<GroceryItem[]>([
-      { id: 1, name: 'Milk', completed: false, section: 'Dairy' },
-      { id: 2, name: 'Bread', completed: true, section: 'Bakery' },
-      { id: 3, name: 'Apples', completed: false, section: 'Produce' },
-  ]);
   const [recipes, setRecipes] = useState<Recipe[]>([]);
-  const [weatherData, setWeatherData] = useState<WeatherData[]>([]);
   
   // State for controlled inputs for on-screen keyboard
   const [newGroceryItemName, setNewGroceryItemName] = useState('');
@@ -137,32 +124,99 @@ function AppContent() {
   const [initialGame, setInitialGame] = useState<Game | null>(null);
   
   // New state for daily briefing
-  const [briefingStatus, setBriefingStatus] = useState<Record<string, string>>({}); // { userId: 'YYYY-MM-DD' }
+  const briefingStatus = persistentState.briefingStatus;
+  const setBriefingStatus = useCallback((updater: React.SetStateAction<Record<string, string>>) => {
+    setPersistentField('briefingStatus', updater);
+  }, [setPersistentField]);
   const [briefingData, setBriefingData] = useState<{ user: User; text: string } | null>(null);
   const [isGeneratingBriefing, setIsGeneratingBriefing] = useState<{ active: boolean, user: User | null }>({ active: false, user: null });
+  const isGeneratingBriefingRef = useRef(false);
 
   // New state for proactive assistant
   const [proactiveSuggestion, setProactiveSuggestion] = useState<ProactiveSuggestion | null>(null);
   const [lastSuggestionTimestamp, setLastSuggestionTimestamp] = useState<number>(0);
 
-  // New state for dinner planning
-  const [dinnerPlan, setDinnerPlan] = useState<Record<string, string>>({
-    [todayKey]: 'Taco Night',
-    [dayAfterTomorrowKey]: 'Pizza',
-  });
   const [schedulingDinnerFor, setSchedulingDinnerFor] = useState<Recipe | null>(null);
   
   // New state for AI Chat Modal
-  const [chatMessages, setChatMessages] = useState<ChatMessage[]>([]);
+  const chatMessages = persistentState.chatMessages;
+  const setChatMessages = useCallback((updater: React.SetStateAction<ChatMessage[]>) => {
+    setPersistentField('chatMessages', updater);
+  }, [setPersistentField]);
   const [isAiChatOpen, setIsAiChatOpen] = useState(false);
 
   // New state for Storyboard
-  const [story, setStory] = useState<StoryPage[]>([]);
+  const story = persistentState.story;
+  const setStory = useCallback((updater: React.SetStateAction<StoryPage[]>) => {
+    setPersistentField('story', updater);
+  }, [setPersistentField]);
   const [isGeneratingStory, setIsGeneratingStory] = useState(false);
+  const [profile, setProfile] = useState<GoogleProfile | null>(null);
+  const calendarSyncGeneration = useRef(0);
+  const [briefingRetryAt, setBriefingRetryAt] = useState(0);
 
   const { showToast } = useToast();
   
   const [audioInitialized, setAudioInitialized] = useState(false);
+
+  const handleGoogleProfile = useCallback((nextProfile: GoogleProfile | null) => {
+    // Invalidate any previous account request before a new profile can render.
+    calendarSyncGeneration.current += 1;
+    setCalendarAccount(nextProfile?.email);
+    setEvents(previous => previous.filter(event => event.source === 'family'));
+    setProfile(nextProfile);
+  }, [setEvents]);
+
+  useEffect(() => {
+    if (getAccessToken()) {
+      getProfile().then(handleGoogleProfile);
+    }
+  }, [handleGoogleProfile]);
+
+  useEffect(() => {
+    if (profile) {
+      const syncGeneration = calendarSyncGeneration.current;
+      // Never leave another account's events on screen while this account loads.
+      setEvents(prev => prev.filter(event => event.source === 'family'));
+      getCalendarEvents().then((events) => {
+        if (calendarSyncGeneration.current !== syncGeneration) return;
+        console.log("HEARTH DEBUG: App.tsx getCalendarEvents success. Raw events count:", events.length);
+        if (events.length === 0) {
+          showToast("Successfully authenticated but found 0 events on your Google Calendar.", "info");
+        } else {
+          showToast(`Successfully loaded ${events.length} events from your Google Calendar!`, "success");
+        }
+        const formattedEvents = events
+          .filter((event: GoogleCalendarEvent) => event.start && (event.start.dateTime || event.start.date))
+          .map((event: GoogleCalendarEvent) => {
+            const startDateTime = event.start.dateTime || `${event.start.date}T00:00:00`;
+            const isAllDay = !event.start.dateTime;
+            
+            return {
+                id: event.id,
+                time: isAllDay ? 'All Day' : new Date(startDateTime).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+                title: event.summary,
+                color: event.backgroundColor || 'bg-blue-500',
+                source: 'google',
+                participants: event.attendees ? event.attendees.map((a) => a.displayName || a.email) : [],
+                date: startDateTime.split('T')[0],
+                calendarName: event.calendarName,
+                creatorEmail: event.creator?.email,
+            };
+          });
+        console.log("HEARTH DEBUG: App.tsx mapped formattedEvents example:", formattedEvents.slice(0, 3));
+        setEvents(prev => {
+            const localEvents = prev.filter(e => e.source === 'family');
+            return [...localEvents, ...formattedEvents];
+        });
+      }).catch((err: any) => {
+        if (calendarSyncGeneration.current !== syncGeneration) return;
+        console.error("Failed to fetch Google Calendar events:", err);
+        const errMsg = err.response?.data?.error?.message || err.message || err;
+        showToast(`Google Calendar Error: ${errMsg}. Please try logging out and signing in again to grant permissions.`, "error");
+      });
+    }
+  }, [profile, showToast]);
 
   const handleInteraction = useCallback(() => {
       if (!audioInitialized) {
@@ -172,42 +226,54 @@ function AppContent() {
   }, [audioInitialized]);
 
   const triggerDailyBriefing = useCallback(async (user: User) => {
-    if (isGeneratingBriefing.active || briefingData) return;
+    if (isGeneratingBriefingRef.current || isGeneratingBriefing.active || briefingData) return;
     
+    isGeneratingBriefingRef.current = true;
     setIsGeneratingBriefing({ active: true, user });
     showToast(`Preparing your daily briefing...`, 'success');
     
-    const todayKey = new Date().toISOString().split('T')[0];
+    const todayKey = toLocalDateKey();
     const userEventsToday = events.filter(e => e.date === todayKey);
     const weatherToday = weatherData.length > 0 ? weatherData[0] : null;
 
     try {
         const briefingText = await generateDailyBriefing(userEventsToday, weatherToday);
         setBriefingData({ user, text: briefingText });
+        setBriefingRetryAt(0);
         
         setBriefingStatus(prev => ({ ...prev, [user.id]: todayKey }));
     } catch (error) {
         console.error("Failed to generate briefing:", error);
         showToast("Sorry, I couldn't prepare your briefing right now.", 'error');
+        // Keep the day eligible and retry once the temporary failure backoff ends.
+        setBriefingRetryAt(Date.now() + 60_000);
     } finally {
+        isGeneratingBriefingRef.current = false;
         setIsGeneratingBriefing({ active: false, user: null });
     }
   }, [events, showToast, isGeneratingBriefing, briefingData, weatherData]);
 
   useEffect(() => {
-    if (isGeneratingBriefing.active || briefingData) return;
+    if (isGeneratingBriefingRef.current || isGeneratingBriefing.active || briefingData) return;
+
+    if (briefingRetryAt > Date.now()) {
+      const timeout = window.setTimeout(() => setBriefingRetryAt(0), briefingRetryAt - Date.now());
+      return () => window.clearTimeout(timeout);
+    }
 
     const now = new Date();
-    const todayKey = now.toISOString().split('T')[0];
+    const todayKey = toLocalDateKey(now);
     const currentHour = now.getHours();
 
     const hasHadBriefingToday = briefingStatus[FAMILY_USER.id] === todayKey;
     const isMorning = currentHour >= 5 && currentHour < 12;
 
-    if (isMorning && !hasHadBriefingToday) {
-        triggerDailyBriefing(FAMILY_USER);
+    // Only wait for an in-progress request. A missing location or a temporary
+    // weather failure should still receive a useful weather-free briefing.
+    if (isMorning && !hasHadBriefingToday && weatherStatus !== 'loading') {
+      triggerDailyBriefing(FAMILY_USER);
     }
-  }, [triggerDailyBriefing, briefingStatus, isGeneratingBriefing.active, briefingData]);
+  }, [triggerDailyBriefing, briefingStatus, isGeneratingBriefing.active, briefingData, briefingRetryAt, weatherStatus, weatherData.length]);
 
   useEffect(() => {
       const handleGlobalClick = (event: MouseEvent) => {
@@ -221,18 +287,6 @@ function AppContent() {
       };
   }, []);
   
-  useEffect(() => {
-    const fetchWeather = async () => {
-        try {
-            const forecast = await getWeatherForecast();
-            setWeatherData(forecast);
-        } catch (error) {
-            console.error("Failed to fetch weather data:", error);
-            showToast("Couldn't fetch weather forecast.", "error");
-        }
-    };
-    fetchWeather();
-  }, [showToast]);
 
   const handleSetActiveView = (view: ModalType | null) => {
       if (view) {
@@ -254,173 +308,107 @@ function AppContent() {
       setEditingEvent(null);
   };
 
-  useEffect(() => {
-    localStorage.setItem('hearth-notes', JSON.stringify(notes));
-  }, [notes]);
   
-  const eventsByDate = useMemo(() => {
-    return events.reduce((acc, event) => {
-        const dayKey = event.date;
-        if (!acc[dayKey]) {
-          acc[dayKey] = [];
-        }
-        acc[dayKey].push(event);
-        return acc;
-    }, {} as Record<string, CalendarEvent[]>);
-  }, [events]);
-
   const handleUpdateNote = useCallback((id: number, text: string) => {
-    setNotes(prev => prev.map(n => n.id === id ? { ...n, text } : n));
+    updateNote(id, text);
     setActiveInput(prev => {
         if (prev && prev.key === `note-${id}`) {
             return { ...prev, value: text };
         }
         return prev;
     });
-  }, []);
-  
-  const handleAddNote = useCallback((text: string = '') => {
-    const newNote: Note = {
-      id: Date.now(),
-      text: text,
-      color: 'yellow',
-    };
-    setNotes(prev => [...prev, newNote]);
-  }, []);
+  }, [updateNote]);
 
   const handleCreateAndEditNote = useCallback(() => {
-    const newNote: Note = {
-        id: Date.now(),
-        text: '',
-        color: 'yellow',
-    };
-    setNotes(prev => [...prev, newNote]);
-    
+    const newNote = addNote('');
     setActiveInput({
         key: `note-${newNote.id}`,
         value: newNote.text,
         setValue: (newText) => handleUpdateNote(newNote.id, newText)
     });
-  }, [handleUpdateNote]);
+  }, [addNote, handleUpdateNote]);
 
-  const handleDeleteNote = useCallback((id: number) => {
-    playSound('delete');
-    setNotes(prev => prev.filter(n => n.id !== id));
-  }, []);
-
-  const handleChangeNoteColor = useCallback((id: number, color: NoteColor) => {
-    setNotes(prev => prev.map(n => n.id === id ? { ...n, color } : n));
-  }, []);
-
-  const handleAddGroceryItem = useCallback((name: string, section: string = 'Other') => {
-      if (name.trim() === '') return;
-      const trimmedName = name.trim();
-      const newItem: GroceryItem = {
-        id: Date.now(),
-        name: trimmedName.charAt(0).toUpperCase() + trimmedName.slice(1),
-        completed: false,
-        section,
-      };
-      setGroceryList(prev => [newItem, ...prev]);
-      setNewGroceryItemName('');
-  }, []);
-
-  const handleToggleGroceryItem = useCallback((id: number) => {
-    setGroceryList(prev => {
-        const item = prev.find(i => i.id === id);
-        if (item) {
-            playSound(item.completed ? 'toggleOff' : 'toggleOn');
-        }
-        return prev.map(i => i.id === id ? { ...i, completed: !i.completed } : i)
-    });
-  }, []);
-
-  const handleClearCompletedGroceries = useCallback(() => {
-    playSound('delete');
-    setGroceryList(prev => prev.filter(item => !item.completed));
-  }, []);
-  
   const handleAddToGroceryListFromRecipe = useCallback((recipe: Recipe) => {
-      let itemsAddedCount = 0;
-      recipe.ingredients.forEach(ingredient => {
-          const parts = ingredient.split(/\s*,\s*|\s+of\s+/);
-          let name = ingredient;
-          
-          if (parts.length > 1) {
-              name = parts[1];
-          } else {
-             const quantityMatch = ingredient.match(/^([\d/.\s]+(\w+)?)/);
-             if (quantityMatch && quantityMatch[0].length < ingredient.length / 2) {
-                 name = ingredient.replace(quantityMatch[0], '').trim();
-             }
-          }
-          
-          const newItem: GroceryItem = {
-            id: Date.now() + itemsAddedCount,
-            name: name.charAt(0).toUpperCase() + name.slice(1),
-            completed: false,
-            section: 'Other',
-          };
-          setGroceryList(prev => [newItem, ...prev]);
-          itemsAddedCount++;
-      });
+      const itemsAddedCount = addFromRecipe(recipe);
       setSelectedRecipe(null);
       showToast(`Added ${itemsAddedCount} ingredients to your grocery list.`, 'success');
-  }, [showToast]);
-  
+  }, [addFromRecipe, showToast]);
+
+  const handleAddGroceryItemWithClear = useCallback((name: string, section: string = 'Other') => {
+      addGroceryItem(name, section);
+      setNewGroceryItemName('');
+  }, [addGroceryItem]);
+
   const handleSaveEvent = useCallback((eventToSave: CalendarEvent) => {
-    setEvents(prev => prev.map(e => e.id === eventToSave.id ? eventToSave : e));
+    editCalendarEvent(eventToSave);
     setEditingEvent(null);
     showToast('Event saved successfully!', 'success');
-  }, [showToast]);
+  }, [editCalendarEvent, showToast]);
 
-  const handleDeleteEvent = useCallback((eventId: number) => {
-      playSound('delete');
-      setEvents(prev => prev.filter(e => e.id !== eventId));
+  const handleDeleteEvent = useCallback((eventId: CalendarEvent['id']) => {
+      deleteCalendarEvent(eventId);
       setEditingEvent(null);
       showToast('Event deleted.', 'success');
-  }, [showToast]);
+  }, [deleteCalendarEvent, showToast]);
   
-  const handleAddCalendarEvent = useCallback((dayIndex: number, title: string, time: string) => {
-      const today = new Date();
-      const targetDate = new Date(today);
-      targetDate.setDate(today.getDate() + dayIndex);
-      const dateKey = targetDate.toISOString().split('T')[0];
-      
-      const newEvent: CalendarEvent = {
-        id: Date.now(),
-        time,
-        title,
-        color: 'bg-purple-500',
-        source: 'family',
-        date: dateKey,
+  const handleAddCalendarEventWithToast = useCallback((title: string, date: string, time: string) => {
+      addCalendarEvent(title, date, time);
+      showToast('Event added to calendar!', 'success');
+  }, [addCalendarEvent, showToast]);
+  
+  const handleSetDinnerForDayWithToast = useCallback((dateKey: string, recipe: Recipe) => {
+      setDinnerForDay(dateKey, recipe);
+      const friendlyDate = new Date(dateKey + 'T00:00:00').toLocaleDateString('en-US', { weekday: 'long' });
+      showToast(`Set "${recipe.recipeName}" for dinner on ${friendlyDate}.`, 'success');
+  }, [setDinnerForDay, showToast]);
+
+  const handleVoiceSetDinner = useCallback((dateKey: string, mealName: string) => {
+      const recipe: Recipe = {
+          id: `voice-dinner-${dateKey}`,
+          recipeName: mealName,
+          description: 'Dinner added by voice.',
+          ingredients: [],
+          instructions: [],
       };
-      setEvents(prev => [...prev, newEvent]);
+      setDinnerForDay(dateKey, recipe);
+      setEvents(prev => {
+          const existingDinner = prev.find(event => event.source === 'family' && event.date === dateKey && event.title.startsWith('Dinner:'));
+          if (existingDinner) {
+              return prev.map(event => event.id === existingDinner.id
+                  ? { ...event, title: `Dinner: ${mealName}`, time: '6:00 PM' }
+                  : event);
+          }
+          return [...prev, {
+              id: Date.now(),
+              title: `Dinner: ${mealName}`,
+              time: '6:00 PM',
+              date: dateKey,
+              color: 'bg-purple-500',
+              source: 'family',
+          }];
+      });
+  }, [setDinnerForDay, setEvents]);
+
+  const handleVoiceRemoveDinner = useCallback((dateKey: string) => {
+      setDinnerForDay(dateKey, null);
+      setEvents(prev => prev.filter(event => !(event.source === 'family' && event.date === dateKey && event.title.startsWith('Dinner:'))));
+  }, [setDinnerForDay, setEvents]);
+
+  const handleVoiceLaunchGame = useCallback((game: Game) => {
+      setInitialGame(game);
+      setActiveView('games');
   }, []);
-  
-  const handleEditCalendarEvent = useCallback((eventToEdit: CalendarEvent) => {
-      setEvents(prev => prev.map(e => e.id === eventToEdit.id ? eventToEdit : e));
-  }, []);
-  
-  const handleDeleteCalendarEvent = useCallback((eventId: number) => {
-      setEvents(prev => prev.filter(e => e.id !== eventId));
-  }, []);
-  
-  const eventsBySourceAndDate = useMemo(() => {
-    return events.reduce((acc, event) => {
-      if (!acc[event.source]) acc[event.source] = {};
-      const dayKey = event.date;
-      if (!acc[event.source][dayKey]) acc[event.source][dayKey] = [];
-      acc[event.source][dayKey].push(event);
-      return acc;
-    }, { family: {} } as Record<CalendarSource, Record<string, CalendarEvent[]>>);
-  }, [events]);
-  
-  const handleSetDinnerForDay = useCallback((dateKey: string, dinner: string) => {
-    setDinnerPlan(prev => ({...prev, [dateKey]: dinner }));
-    const friendlyDate = new Date(dateKey + 'T00:00:00').toLocaleDateString('en-US', { weekday: 'long' });
-    showToast(`Set "${dinner}" for dinner on ${friendlyDate}.`, 'success');
-  }, [showToast]);
+
+  const handleVoiceCloseCurrent = useCallback(() => {
+      if (briefingData) return setBriefingData(null);
+      if (isAiChatOpen) return setIsAiChatOpen(false);
+      if (schedulingDinnerFor) return setSchedulingDinnerFor(null);
+      if (selectedRecipe) return setSelectedRecipe(null);
+      if (editingEvent) return setEditingEvent(null);
+      if (selectedDay) return setSelectedDay(null);
+      setActiveView(null);
+      setInitialGame(null);
+  }, [briefingData, editingEvent, isAiChatOpen, schedulingDinnerFor, selectedDay, selectedRecipe]);
 
   const handleSetActiveInput = useCallback((key: string, value: string, setValue: (value: string) => void) => {
       setActiveInput({ key, value, setValue });
@@ -469,48 +457,98 @@ function AppContent() {
     fetchPersonalizedRecipes();
   }, [fetchPersonalizedRecipes]);
 
+  const proactiveCheckInFlightRef = useRef(false);
+  const hasMountedProactiveDependenciesRef = useRef(false);
+  const proactiveContextRef = useRef({
+    proactiveSuggestion,
+    activeView,
+    isGeneratingBriefing,
+    briefingData,
+    lastSuggestionTimestamp,
+    eventsByDate,
+    groceryList,
+    weatherData,
+    userLocation: persistentState.location,
+  });
+
   useEffect(() => {
-    const PROACTIVE_CHECK_INTERVAL = 30000;
+    proactiveContextRef.current = {
+      proactiveSuggestion,
+      activeView,
+      isGeneratingBriefing,
+      briefingData,
+      lastSuggestionTimestamp,
+      eventsByDate,
+      groceryList,
+      weatherData,
+      userLocation: persistentState.location,
+    };
+  });
+
+  const runProactiveCheck = useCallback(async () => {
     const SUGGESTION_COOLDOWN = 5 * 60 * 1000;
+    const context = proactiveContextRef.current;
+    const weatherToday = context.weatherData[0];
+    const shouldCheck =
+      !proactiveCheckInFlightRef.current &&
+      !context.proactiveSuggestion &&
+      !context.activeView &&
+      !context.isGeneratingBriefing.active &&
+      !context.briefingData &&
+      Boolean(weatherToday) &&
+      Date.now() - context.lastSuggestionTimestamp > SUGGESTION_COOLDOWN;
 
-    const intervalId = setInterval(async () => {
-        const shouldCheck = 
-            !proactiveSuggestion &&
-            !activeView &&
-            !isGeneratingBriefing.active &&
-            !briefingData &&
-            Date.now() - lastSuggestionTimestamp > SUGGESTION_COOLDOWN;
+    if (!shouldCheck || !weatherToday) return;
 
-        if (shouldCheck) {
-            const allEvents = Object.keys(eventsByDate).reduce((acc: CalendarEvent[], key) => acc.concat(eventsByDate[key]), []);
-            try {
-                const weatherToday = weatherData.length > 0 ? weatherData[0] : null;
-                const suggestion = await getProactiveSuggestion(
-                    allEvents,
-                    groceryList,
-                    weatherToday
-                );
+    proactiveCheckInFlightRef.current = true;
+    const allEvents = Object.values(context.eventsByDate).flat() as CalendarEvent[];
 
-                if (suggestion) {
-                    setProactiveSuggestion(suggestion);
-                }
-            } catch (error) {
-                console.error("Error fetching proactive suggestion:", error);
-            }
-        }
-    }, PROACTIVE_CHECK_INTERVAL);
+    try {
+      const suggestion = await getProactiveSuggestion(
+        allEvents,
+        context.groceryList,
+        weatherToday,
+        context.userLocation || undefined
+      );
 
-    return () => clearInterval(intervalId);
-  }, [proactiveSuggestion, activeView, lastSuggestionTimestamp, eventsByDate, groceryList, isGeneratingBriefing, briefingData, weatherData]);
+      if (suggestion) {
+        setProactiveSuggestion(suggestion);
+      }
+    } catch (error) {
+      console.error("Error fetching proactive suggestion:", error);
+    } finally {
+      proactiveCheckInFlightRef.current = false;
+    }
+  }, []);
+
+  // Run once at boot, then use a coarse refresh window for weather-driven changes.
+  useEffect(() => {
+    const PROACTIVE_REFRESH_INTERVAL = 6 * 60 * 60 * 1000;
+    void runProactiveCheck();
+    const intervalId = window.setInterval(() => void runProactiveCheck(), PROACTIVE_REFRESH_INTERVAL);
+    return () => window.clearInterval(intervalId);
+  }, [runProactiveCheck]);
+
+  // Re-check when the data that informs a suggestion actually changes.
+  useEffect(() => {
+    if (!hasMountedProactiveDependenciesRef.current) {
+      hasMountedProactiveDependenciesRef.current = true;
+      return;
+    }
+    void runProactiveCheck();
+  }, [eventsByDate, groceryList, weatherData, persistentState.location, runProactiveCheck]);
   
   const handleAcceptSuggestion = useCallback((suggestion: ProactiveSuggestion) => {
     if (suggestion.type === 'grocery' && suggestion.actionableItem) {
-        handleAddGroceryItem(suggestion.actionableItem, 'Other');
+        handleAddGroceryItemWithClear(suggestion.actionableItem, 'Other');
         showToast(`Added "${suggestion.actionableItem}" to your grocery list.`, 'success');
+    } else if (suggestion.type === 'event') {
+        setActiveView('events');
+        showToast(`Here are some local events you might like!`, 'success');
     }
     setProactiveSuggestion(null);
     setLastSuggestionTimestamp(Date.now());
-  }, [handleAddGroceryItem, showToast]);
+  }, [handleAddGroceryItemWithClear, showToast]);
 
   const handleDismissSuggestion = useCallback(() => {
     setProactiveSuggestion(null);
@@ -528,12 +566,12 @@ function AppContent() {
   };
   
   const handleGeneralQuery = useCallback((userQuery: string, modelResponse: string) => {
-    setChatMessages([
+    setChatMessages(previous => [...previous,
         { role: 'user', content: userQuery },
         { role: 'model', content: modelResponse },
     ]);
     setIsAiChatOpen(true);
-}, []);
+}, [setChatMessages]);
 
     // --- Storyboard Handlers ---
     const handleStartStory = useCallback(async (prompt: string) => {
@@ -583,11 +621,15 @@ function AppContent() {
     const renderActiveView = () => {
         switch (activeView) {
             case 'notes':
-                return <NotesApp notes={notes} onAdd={handleCreateAndEditNote} onUpdate={handleUpdateNote} onDelete={handleDeleteNote} onChangeColor={handleChangeNoteColor} onNoteFocus={(id) => { const note = notes.find(n => n.id === id); if(note) handleSetActiveInput(`note-${id}`, note.text, (newText) => handleUpdateNote(id, newText)) }} activeInputKey={activeInput?.key} />;
+                return <NotesApp notes={notes} onAdd={handleCreateAndEditNote} onUpdate={handleUpdateNote} onDelete={deleteNote} onChangeColor={changeNoteColor} onNoteFocus={(id) => { const note = notes.find(n => n.id === id); if(note) handleSetActiveInput(`note-${id}`, note.text, (newText) => handleUpdateNote(id, newText)) }} activeInputKey={activeInput?.key} />;
             case 'grocery':
-                return <GroceryApp items={groceryList} onToggle={handleToggleGroceryItem} onAdd={handleAddGroceryItem} onClearCompleted={handleClearCompletedGroceries} newItemName={newGroceryItemName} setNewItemName={syncSetValue('new-grocery-name', setNewGroceryItemName)} onNewItemNameFocus={() => handleSetActiveInput('new-grocery-name', newGroceryItemName, setNewGroceryItemName)} activeInputKey={activeInput?.key} />;
+                return <GroceryApp items={groceryList} onToggle={toggleGroceryItem} onAdd={handleAddGroceryItemWithClear} onClearCompleted={clearCompletedGroceries} newItemName={newGroceryItemName} setNewItemName={syncSetValue('new-grocery-name', setNewGroceryItemName)} onNewItemNameFocus={() => handleSetActiveInput('new-grocery-name', newGroceryItemName, setNewGroceryItemName)} activeInputKey={activeInput?.key} />;
             case 'recipes':
                 return <RecipesApp recipes={recipes} onSelectRecipe={setSelectedRecipe} isFetching={isFetchingRecipes} onSearch={handleSearchRecipes} />;
+            case 'mealPlanner':
+                return <MealPlannerApp onAddCalendarEvent={handleAddCalendarEventWithToast} onScheduleDinner={handleSetDinnerForDayWithToast} onRemoveDinner={handleVoiceRemoveDinner} dinnerPlan={dinnerPlan} />;
+            case 'events':
+                return <LocalEvents onAddCalendarEvent={handleAddCalendarEventWithToast} />;
             case 'games':
                 return <GamesApp initialGame={initialGame} story={story} isGenerating={isGeneratingStory} onStartStory={handleStartStory} onContinueStory={handleContinueStory} onResetStory={handleResetStory} />;
             default:
@@ -610,6 +652,34 @@ function AppContent() {
         <main className="flex-1 flex flex-col relative overflow-hidden">
             <header className="flex justify-between items-center flex-shrink-0 p-6">
                 <h1 className="text-3xl font-bold text-teal-600 drop-shadow-sm">{getHeaderText()}</h1>
+                <div>
+                    {profile ? (
+                        <div className="flex items-center gap-4">
+                            <img src={profile.picture} alt="user image" className="w-10 h-10 rounded-full" />
+                            <button onClick={() => {
+                                calendarSyncGeneration.current += 1;
+                                logout();
+                                setProfile(null);
+                                setEvents(previous => previous.filter(event => event.source === 'family'));
+                            }} className="text-sm font-medium text-slate-600 hover:text-slate-900">Log out</button>
+                        </div>
+                    ) : (
+                        <>
+                            {import.meta.env.VITE_USE_FAKE_DATA === 'true' ? (
+                                <button onClick={() => {
+                                    setAccessToken('fake_token');
+                                    getProfile().then(handleGoogleProfile);
+                                }} className="ml-4 text-sm font-medium text-slate-600 hover:text-slate-900">
+                                    Login with Fake User
+                                </button>
+                            ) : import.meta.env.VITE_GOOGLE_CLIENT_ID && import.meta.env.VITE_GOOGLE_CLIENT_ID !== 'YOUR_GOOGLE_CLIENT_ID' ? (
+                                <GoogleAuth setProfile={handleGoogleProfile} />
+                            ) : (
+                                <span className="text-sm text-slate-500">Google sign-in is not configured.</span>
+                            )}
+                        </>
+                    )}
+                </div>
             </header>
             
             <div className="relative flex-1 px-6 pb-6 pt-0 min-h-0">
@@ -635,11 +705,11 @@ function AppContent() {
             {selectedDay && (
                 <DayDetailView 
                   day={selectedDay} 
-                  events={eventsByDate[selectedDay.toISOString().split('T')[0]] || []}
+                  events={eventsByDate[toLocalDateKey(selectedDay)] || []}
                   weather={weatherData.find(w => w.day === selectedDay.toLocaleDateString('en-US', { weekday: 'short' })) || null}
                   onClose={handleCloseDayDetailView}
                   onSelectEvent={setEditingEvent}
-                  dinner={dinnerPlan[selectedDay.toISOString().split('T')[0]]}
+                  dinner={dinnerPlan[toLocalDateKey(selectedDay)]}
                 />
             )}
 
@@ -673,7 +743,8 @@ function AppContent() {
                     onClose={() => setSchedulingDinnerFor(null)}
                     recipeName={schedulingDinnerFor.recipeName}
                     onSchedule={(dateKey, recipeName) => {
-                        handleSetDinnerForDay(dateKey, recipeName);
+                        handleSetDinnerForDayWithToast(dateKey, schedulingDinnerFor);
+                        addCalendarEvent(`Dinner: ${schedulingDinnerFor.recipeName}`, dateKey, '6:00 PM');
                         setSchedulingDinnerFor(null);
                     }}
                 />
@@ -689,18 +760,26 @@ function AppContent() {
             
             <VoiceAssistant
                 notes={notes}
-                onAddNote={handleAddNote}
-                onDeleteNote={handleDeleteNote}
+                onAddNote={addNote}
+                onUpdateNote={updateNote}
+                onDeleteNote={deleteNote}
+                onChangeNoteColor={changeNoteColor}
                 eventsBySource={eventsBySourceAndDate}
-                onAddCalendarEvent={handleAddCalendarEvent}
-                onDeleteCalendarEvent={handleDeleteCalendarEvent}
-                onEditCalendarEvent={handleEditCalendarEvent}
+                onAddCalendarEvent={handleAddCalendarEventWithToast}
+                onDeleteCalendarEvent={deleteCalendarEvent}
+                onEditCalendarEvent={editCalendarEvent}
                 groceryList={groceryList}
-                onAddGroceryItem={handleAddGroceryItem}
-                onToggleGroceryItem={handleToggleGroceryItem}
-                onClearCompletedGroceries={handleClearCompletedGroceries}
+                onAddGroceryItem={handleAddGroceryItemWithClear}
+                onToggleGroceryItem={toggleGroceryItem}
+                onRenameGroceryItem={renameGroceryItem}
+                onRemoveGroceryItem={removeGroceryItem}
+                onClearCompletedGroceries={clearCompletedGroceries}
                 setActiveModal={handleSetActiveView}
-                onSetDinnerForDay={handleSetDinnerForDay}
+                onLaunchGame={handleVoiceLaunchGame}
+                onCloseCurrent={handleVoiceCloseCurrent}
+                onSetDinnerForDay={handleVoiceSetDinner}
+                onRemoveDinnerForDay={handleVoiceRemoveDinner}
+                onSearchRecipes={handleSearchRecipes}
                 onGeneralQuery={handleGeneralQuery}
                 onStartStory={handleStartStory}
             />
@@ -713,9 +792,21 @@ function AppContent() {
 
 function App() {
     return (
-        <ToastProvider>
-            <AppContent />
-        </ToastProvider>
+        <PersistentStateProvider>
+            <DndProvider backend={HTML5Backend}>
+                <ToastProvider>
+                    <CalendarProvider>
+                        <GroceryProvider>
+                            <NotesProvider>
+                                <RecipeProvider>
+                                    <AppContent />
+                                </RecipeProvider>
+                            </NotesProvider>
+                        </GroceryProvider>
+                    </CalendarProvider>
+                </ToastProvider>
+            </DndProvider>
+        </PersistentStateProvider>
     );
 }
 

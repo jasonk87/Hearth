@@ -8,7 +8,7 @@ interface EventDetailViewProps {
   event: CalendarEvent;
   onClose: () => void;
   onSave: (event: CalendarEvent) => void;
-  onDelete: (eventId: number) => void;
+  onDelete: (eventId: CalendarEvent['id']) => void;
   activeInputKey?: string;
   onTitleFocus: () => void;
   onTimeFocus: () => void;
