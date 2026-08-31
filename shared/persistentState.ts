@@ -1,4 +1,4 @@
-import type { CalendarEvent, ChatMessage, GroceryItem, Note, Recipe, StoryPage } from '../types';
+import type { CalendarEvent, ChatMessage, GroceryItem, LocalEventPreferences, Note, Recipe, StoryPage } from '../types';
 
 export interface PersistentAppState {
   groceryList: GroceryItem[];
@@ -10,6 +10,7 @@ export interface PersistentAppState {
   briefingStatus: Record<string, string>;
   chatMessages: ChatMessage[];
   story: StoryPage[];
+  localEventPreferences: LocalEventPreferences;
 }
 
 export const DEFAULT_PERSISTENT_STATE: PersistentAppState = {
@@ -30,6 +31,7 @@ export const DEFAULT_PERSISTENT_STATE: PersistentAppState = {
   briefingStatus: {},
   chatMessages: [],
   story: [],
+  localEventPreferences: { radius: 50, reactions: {}, seen: [] },
 };
 
 export const PERSISTENT_STATE_KEYS = Object.keys(DEFAULT_PERSISTENT_STATE) as Array<keyof PersistentAppState>;

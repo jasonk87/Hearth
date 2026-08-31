@@ -146,6 +146,15 @@ export interface GoogleCalendarEvent {
   };
 }
 
+export type LocalEventCategory = 'family' | 'music' | 'sports' | 'festival' | 'food' | 'outdoors' | 'other';
+export type LocalEventReaction = 'interested' | 'going' | 'notInterested';
+
+export interface LocalEventPreferences {
+  radius: 25 | 50 | 75 | 100;
+  reactions: Record<string, LocalEventReaction>;
+  seen: string[];
+}
+
 export interface LocalEvent {
   id: string;
   title: string;
@@ -154,4 +163,11 @@ export interface LocalEvent {
   location: string;
   description: string;
   imageUrl?: string;
+  venue?: string;
+  sourceUrl?: string;
+  ticketUrl?: string;
+  price?: string;
+  distanceMiles?: number;
+  categories: LocalEventCategory[];
+  isOutdoor?: boolean;
 }

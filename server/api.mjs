@@ -3,8 +3,8 @@ import path from 'node:path';
 import { GoogleGenAI } from '@google/genai';
 
 const stateFile = path.resolve(process.cwd(), 'data', 'hearth-state.json');
-const stateKeys = ['groceryList', 'notes', 'familyEvents', 'dinnerPlan', 'savedRecipes', 'location', 'briefingStatus', 'chatMessages', 'story'];
-const defaultState = { groceryList: [], notes: [], familyEvents: [], dinnerPlan: {}, savedRecipes: [], location: '', briefingStatus: {}, chatMessages: [], story: [] };
+const stateKeys = ['groceryList', 'notes', 'familyEvents', 'dinnerPlan', 'savedRecipes', 'location', 'briefingStatus', 'chatMessages', 'story', 'localEventPreferences'];
+const defaultState = { groceryList: [], notes: [], familyEvents: [], dinnerPlan: {}, savedRecipes: [], location: '', briefingStatus: {}, chatMessages: [], story: [], localEventPreferences: { radius: 50, reactions: {}, seen: [] } };
 let writeQueue = Promise.resolve();
 
 const readState = async () => {
