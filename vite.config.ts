@@ -1,6 +1,6 @@
 import path from 'path';
 import type { IncomingMessage, ServerResponse } from 'node:http';
-import { defineConfig } from 'vite';
+import { defineConfig, loadEnv } from 'vite';
 import react from '@vitejs/plugin-react';
 import { handleApiRequest } from './server/api.mjs';
 
@@ -20,15 +20,21 @@ const apiPlugin = () => ({
   },
 });
 
-export default defineConfig({
-  server: {
-    port: 3000,
-    host: '0.0.0.0',
-  },
-  plugins: [apiPlugin(), react()],
-  resolve: {
-    alias: {
-      '@': path.resolve(__dirname, '.'),
+export default defineConfig(({ mode }) => {
+  // Server-only variables are deliberately unprefixed, so make them available
+  // to the dev/preview API middleware without exposing them to browser code.
+  Object.assign(process.env, loadEnv(mode, process.cwd(), ''));
+
+  return {
+    server: {
+      port: 3000,
+      host: '0.0.0.0',
+    },
+    plugins: [apiPlugin(), react()],
+    resolve: {
+      alias: {
+        '@': path.resolve(__dirname, '.'),
+      }
     }
-  }
+  };
 });

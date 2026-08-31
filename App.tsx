@@ -107,7 +107,7 @@ function AppContent() {
   const { state: persistentState, setField: setPersistentField } = usePersistentState();
   const { notes, addNote, updateNote, deleteNote, changeNoteColor } = useNotes();
   const { groceryList, addGroceryItem, toggleGroceryItem, renameGroceryItem, removeGroceryItem, clearCompletedGroceries, addFromRecipe } = useGroceries();
-  const { events, setEvents, weatherData, dinnerPlan, addCalendarEvent, editCalendarEvent, deleteCalendarEvent, setDinnerForDay, eventsByDate, eventsBySourceAndDate } = useCalendar();
+  const { events, setEvents, weatherData, weatherStatus, dinnerPlan, addCalendarEvent, editCalendarEvent, deleteCalendarEvent, setDinnerForDay, eventsByDate, eventsBySourceAndDate } = useCalendar();
 
   const [activeInput, setActiveInput] = useState<ActiveInput>(null);
   const [activeView, setActiveView] = useState<ModalType | null>(null);
@@ -152,26 +152,34 @@ function AppContent() {
   }, [setPersistentField]);
   const [isGeneratingStory, setIsGeneratingStory] = useState(false);
   const [profile, setProfile] = useState<GoogleProfile | null>(null);
+  const calendarSyncGeneration = useRef(0);
+  const [briefingRetryAt, setBriefingRetryAt] = useState(0);
 
   const { showToast } = useToast();
   
   const [audioInitialized, setAudioInitialized] = useState(false);
 
+  const handleGoogleProfile = useCallback((nextProfile: GoogleProfile | null) => {
+    // Invalidate any previous account request before a new profile can render.
+    calendarSyncGeneration.current += 1;
+    setCalendarAccount(nextProfile?.email);
+    setEvents(previous => previous.filter(event => event.source === 'family'));
+    setProfile(nextProfile);
+  }, [setEvents]);
+
   useEffect(() => {
     if (getAccessToken()) {
-      getProfile().then(profile => {
-        setCalendarAccount(profile?.email);
-        setProfile(profile);
-      });
+      getProfile().then(handleGoogleProfile);
     }
-  }, []);
+  }, [handleGoogleProfile]);
 
   useEffect(() => {
     if (profile) {
-      setCalendarAccount(profile.email);
+      const syncGeneration = calendarSyncGeneration.current;
       // Never leave another account's events on screen while this account loads.
       setEvents(prev => prev.filter(event => event.source === 'family'));
       getCalendarEvents().then((events) => {
+        if (calendarSyncGeneration.current !== syncGeneration) return;
         console.log("HEARTH DEBUG: App.tsx getCalendarEvents success. Raw events count:", events.length);
         if (events.length === 0) {
           showToast("Successfully authenticated but found 0 events on your Google Calendar.", "info");
@@ -202,6 +210,7 @@ function AppContent() {
             return [...localEvents, ...formattedEvents];
         });
       }).catch((err: any) => {
+        if (calendarSyncGeneration.current !== syncGeneration) return;
         console.error("Failed to fetch Google Calendar events:", err);
         const errMsg = err.response?.data?.error?.message || err.message || err;
         showToast(`Google Calendar Error: ${errMsg}. Please try logging out and signing in again to grant permissions.`, "error");
@@ -230,13 +239,14 @@ function AppContent() {
     try {
         const briefingText = await generateDailyBriefing(userEventsToday, weatherToday);
         setBriefingData({ user, text: briefingText });
+        setBriefingRetryAt(0);
         
         setBriefingStatus(prev => ({ ...prev, [user.id]: todayKey }));
     } catch (error) {
         console.error("Failed to generate briefing:", error);
         showToast("Sorry, I couldn't prepare your briefing right now.", 'error');
-        // Prevent infinite loop by marking the briefing as attempted today
-        setBriefingStatus(prev => ({ ...prev, [user.id]: todayKey }));
+        // Keep the day eligible and retry once the temporary failure backoff ends.
+        setBriefingRetryAt(Date.now() + 60_000);
     } finally {
         isGeneratingBriefingRef.current = false;
         setIsGeneratingBriefing({ active: false, user: null });
@@ -246,6 +256,11 @@ function AppContent() {
   useEffect(() => {
     if (isGeneratingBriefingRef.current || isGeneratingBriefing.active || briefingData) return;
 
+    if (briefingRetryAt > Date.now()) {
+      const timeout = window.setTimeout(() => setBriefingRetryAt(0), briefingRetryAt - Date.now());
+      return () => window.clearTimeout(timeout);
+    }
+
     const now = new Date();
     const todayKey = toLocalDateKey(now);
     const currentHour = now.getHours();
@@ -253,10 +268,10 @@ function AppContent() {
     const hasHadBriefingToday = briefingStatus[FAMILY_USER.id] === todayKey;
     const isMorning = currentHour >= 5 && currentHour < 12;
 
-    if (isMorning && !hasHadBriefingToday) {
-        triggerDailyBriefing(FAMILY_USER);
+    if (isMorning && !hasHadBriefingToday && weatherStatus === 'ready' && weatherData.length > 0) {
+      triggerDailyBriefing(FAMILY_USER);
     }
-  }, [triggerDailyBriefing, briefingStatus, isGeneratingBriefing.active, briefingData]);
+  }, [triggerDailyBriefing, briefingStatus, isGeneratingBriefing.active, briefingData, briefingRetryAt, weatherStatus, weatherData.length]);
 
   useEffect(() => {
       const handleGlobalClick = (event: MouseEvent) => {
@@ -640,6 +655,7 @@ function AppContent() {
                         <div className="flex items-center gap-4">
                             <img src={profile.picture} alt="user image" className="w-10 h-10 rounded-full" />
                             <button onClick={() => {
+                                calendarSyncGeneration.current += 1;
                                 logout();
                                 setProfile(null);
                                 setEvents(previous => previous.filter(event => event.source === 'family'));
@@ -650,12 +666,12 @@ function AppContent() {
                             {import.meta.env.VITE_USE_FAKE_DATA === 'true' ? (
                                 <button onClick={() => {
                                     setAccessToken('fake_token');
-                                    getProfile().then(setProfile);
+                                    getProfile().then(handleGoogleProfile);
                                 }} className="ml-4 text-sm font-medium text-slate-600 hover:text-slate-900">
                                     Login with Fake User
                                 </button>
                             ) : import.meta.env.VITE_GOOGLE_CLIENT_ID && import.meta.env.VITE_GOOGLE_CLIENT_ID !== 'YOUR_GOOGLE_CLIENT_ID' ? (
-                                <GoogleAuth setProfile={setProfile} />
+                                <GoogleAuth setProfile={handleGoogleProfile} />
                             ) : (
                                 <span className="text-sm text-slate-500">Google sign-in is not configured.</span>
                             )}

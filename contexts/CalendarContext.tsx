@@ -8,6 +8,7 @@ interface CalendarContextType {
   events: CalendarEvent[];
   setEvents: React.Dispatch<React.SetStateAction<CalendarEvent[]>>;
   weatherData: WeatherData[];
+  weatherStatus: 'idle' | 'loading' | 'ready' | 'error';
   dinnerPlan: Record<string, Recipe>;
   addCalendarEvent: (title: string, date: string, time: string) => void;
   editCalendarEvent: (eventToEdit: CalendarEvent) => void;
@@ -44,6 +45,7 @@ export const CalendarProvider: React.FC<{ children: React.ReactNode }> = ({ chil
   const [events, setEvents] = useState<CalendarEvent[]>(state.familyEvents);
   
   const [weatherData, setWeatherData] = useState<WeatherData[]>([]);
+  const [weatherStatus, setWeatherStatus] = useState<'idle' | 'loading' | 'ready' | 'error'>('idle');
   
   const dinnerPlan = state.dinnerPlan;
 
@@ -53,15 +55,27 @@ export const CalendarProvider: React.FC<{ children: React.ReactNode }> = ({ chil
   }, [events, setField]);
 
   useEffect(() => {
+    if (!state.location.trim()) {
+      setWeatherData([]);
+      setWeatherStatus('idle');
+      return;
+    }
+    let active = true;
     const fetchWeather = async () => {
+        setWeatherStatus('loading');
         try {
             const forecast = await getWeatherForecast(state.location);
-            setWeatherData(forecast);
+            if (active) {
+              setWeatherData(forecast);
+              setWeatherStatus('ready');
+            }
         } catch (error) {
             console.error("Failed to fetch weather data:", error);
+            if (active) setWeatherStatus('error');
         }
     };
     fetchWeather();
+    return () => { active = false; };
   }, [state.location]);
 
   const addCalendarEvent = useCallback((title: string, date: string, time: string) => {
@@ -126,7 +140,7 @@ export const CalendarProvider: React.FC<{ children: React.ReactNode }> = ({ chil
 
   return (
     <CalendarContext.Provider value={{
-      events, setEvents, weatherData, dinnerPlan,
+      events, setEvents, weatherData, weatherStatus, dinnerPlan,
       addCalendarEvent, editCalendarEvent, deleteCalendarEvent, setDinnerForDay,
       eventsByDate, eventsBySourceAndDate
     }}>

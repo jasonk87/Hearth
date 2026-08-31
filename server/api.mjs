@@ -1,4 +1,4 @@
-import { mkdir, readFile, writeFile } from 'node:fs/promises';
+import { mkdir, readFile, rename, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { GoogleGenAI } from '@google/genai';
 
@@ -10,9 +10,19 @@ let writeQueue = Promise.resolve();
 const readState = async () => {
   try { return { state: { ...defaultState, ...JSON.parse(await readFile(stateFile, 'utf8')) }, isNew: false }; }
   catch (error) {
-    if (error.code !== 'ENOENT') console.error('Unable to read persisted Hearth state:', error);
-    return { state: defaultState, isNew: true };
+    if (error?.code === 'ENOENT') return { state: defaultState, isNew: true };
+    // Preserve the original file for recovery instead of treating corruption as
+    // a fresh household and overwriting it with an empty state.
+    console.error('Unable to read persisted Hearth state; refusing to replace it:', error);
+    throw new Error('Persisted Hearth state is unreadable. Restore or repair data/hearth-state.json before continuing.');
   }
+};
+
+const writeStateAtomically = async (state) => {
+  await mkdir(path.dirname(stateFile), { recursive: true });
+  const tempFile = `${stateFile}.${process.pid}.tmp`;
+  await writeFile(tempFile, `${JSON.stringify(state, null, 2)}\n`, 'utf8');
+  await rename(tempFile, stateFile);
 };
 
 const readBody = async (request) => {
@@ -74,8 +84,7 @@ export const handleApiRequest = async (request, response) => {
       const patch = Object.fromEntries(Object.entries(body).filter(([key]) => stateKeys.includes(key)));
       writeQueue = writeQueue.catch(() => undefined).then(async () => {
         const { state } = await readState();
-        await mkdir(path.dirname(stateFile), { recursive: true });
-        await writeFile(stateFile, `${JSON.stringify({ ...state, ...patch }, null, 2)}\n`, 'utf8');
+        await writeStateAtomically({ ...state, ...patch });
       });
       await writeQueue;
       return sendJson(response, 200, { ok: true });

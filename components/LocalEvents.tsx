@@ -3,7 +3,6 @@ import { getLocalEvents } from '../services/eventService';
 import type { LocalEvent } from '../types';
 import { Loader } from './Loader';
 import { CalendarPlusIcon, MapPinIcon, ClockIcon, SearchIcon } from './icons';
-import { useToast } from './Toast';
 import { EventDetailModal } from './EventDetailModal';
 import { MicInputButton } from './MicInputButton';
 import { usePersistentState } from '../contexts/PersistentStateContext';
@@ -22,7 +21,6 @@ export const LocalEvents: React.FC<{
   const [isEditingLocation, setIsEditingLocation] = useState(false);
   const [tempLocation, setTempLocation] = useState('');
   
-  const { showToast } = useToast();
 
   const loadEventsForLocation = async (locString: string) => {
       setLoading(true);
@@ -79,7 +77,6 @@ export const LocalEvents: React.FC<{
 
   const handleAddEvent = (event: LocalEvent) => {
     onAddCalendarEvent(event.title, event.date, event.time);
-    showToast(`Added ${event.title} to calendar!`, 'success');
   };
 
   if (loading) {
