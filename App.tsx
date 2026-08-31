@@ -24,7 +24,8 @@ import { GroceryProvider, useGroceries } from './contexts/GroceryContext';
 import { CalendarProvider, useCalendar } from './contexts/CalendarContext';
 import { RecipeProvider } from './contexts/RecipeContext';
 import { USE_FAKE_DATA } from './services/geminiService';
-import { setAccessToken, logout, getProfile, getAccessToken, getCalendarEvents } from './services/authService';
+import { setAccessToken, logout, getProfile, getAccessToken, getCalendarEvents, setCalendarAccount } from './services/authService';
+import { toLocalDateKey } from './services/dateService';
 import GoogleAuth from './components/GoogleAuth';
 import { DailyBriefing } from './components/DailyBriefing';
 import { Loader } from './components/Loader';
@@ -158,12 +159,18 @@ function AppContent() {
 
   useEffect(() => {
     if (getAccessToken()) {
-      getProfile().then(setProfile);
+      getProfile().then(profile => {
+        setCalendarAccount(profile?.email);
+        setProfile(profile);
+      });
     }
   }, []);
 
   useEffect(() => {
     if (profile) {
+      setCalendarAccount(profile.email);
+      // Never leave another account's events on screen while this account loads.
+      setEvents(prev => prev.filter(event => event.source === 'family'));
       getCalendarEvents().then((events) => {
         console.log("HEARTH DEBUG: App.tsx getCalendarEvents success. Raw events count:", events.length);
         if (events.length === 0) {
@@ -216,7 +223,7 @@ function AppContent() {
     setIsGeneratingBriefing({ active: true, user });
     showToast(`Preparing your daily briefing...`, 'success');
     
-    const todayKey = new Date().toISOString().split('T')[0];
+    const todayKey = toLocalDateKey();
     const userEventsToday = events.filter(e => e.date === todayKey);
     const weatherToday = weatherData.length > 0 ? weatherData[0] : null;
 
@@ -240,7 +247,7 @@ function AppContent() {
     if (isGeneratingBriefingRef.current || isGeneratingBriefing.active || briefingData) return;
 
     const now = new Date();
-    const todayKey = now.toISOString().split('T')[0];
+    const todayKey = toLocalDateKey(now);
     const currentHour = now.getHours();
 
     const hasHadBriefingToday = briefingStatus[FAMILY_USER.id] === todayKey;
@@ -477,7 +484,7 @@ function AppContent() {
     if (!shouldCheck || !weatherToday) return;
 
     proactiveCheckInFlightRef.current = true;
-    const allEvents = Object.values(context.eventsByDate).flat();
+    const allEvents = Object.values(context.eventsByDate).flat() as CalendarEvent[];
 
     try {
       const suggestion = await getProactiveSuggestion(
@@ -635,6 +642,7 @@ function AppContent() {
                             <button onClick={() => {
                                 logout();
                                 setProfile(null);
+                                setEvents(previous => previous.filter(event => event.source === 'family'));
                             }} className="text-sm font-medium text-slate-600 hover:text-slate-900">Log out</button>
                         </div>
                     ) : (
@@ -646,8 +654,10 @@ function AppContent() {
                                 }} className="ml-4 text-sm font-medium text-slate-600 hover:text-slate-900">
                                     Login with Fake User
                                 </button>
-                            ) : (
+                            ) : import.meta.env.VITE_GOOGLE_CLIENT_ID && import.meta.env.VITE_GOOGLE_CLIENT_ID !== 'YOUR_GOOGLE_CLIENT_ID' ? (
                                 <GoogleAuth setProfile={setProfile} />
+                            ) : (
+                                <span className="text-sm text-slate-500">Google sign-in is not configured.</span>
                             )}
                         </>
                     )}
@@ -677,11 +687,11 @@ function AppContent() {
             {selectedDay && (
                 <DayDetailView 
                   day={selectedDay} 
-                  events={eventsByDate[selectedDay.toISOString().split('T')[0]] || []}
+                  events={eventsByDate[toLocalDateKey(selectedDay)] || []}
                   weather={weatherData.find(w => w.day === selectedDay.toLocaleDateString('en-US', { weekday: 'short' })) || null}
                   onClose={handleCloseDayDetailView}
                   onSelectEvent={setEditingEvent}
-                  dinner={dinnerPlan[selectedDay.toISOString().split('T')[0]]}
+                  dinner={dinnerPlan[toLocalDateKey(selectedDay)]}
                 />
             )}
 

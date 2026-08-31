@@ -1,4 +1,3 @@
-import { Modality } from '@google/genai';
 import { CalendarEvent, WeatherData } from '../types';
 import { ai, USE_FAKE_DATA } from './geminiService';
 
@@ -52,7 +51,7 @@ export async function getBriefingAudio(text: string): Promise<string> {
         model: "gemini-2.5-flash-preview-tts",
         contents: [{ parts: [{ text: text }] }],
         config: {
-            responseModalities: [Modality.AUDIO],
+            responseModalities: ['AUDIO'],
             speechConfig: {
                 voiceConfig: {
                   prebuiltVoiceConfig: { voiceName: 'Kore' }, // A calm, friendly voice

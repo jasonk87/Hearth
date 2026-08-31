@@ -4,6 +4,7 @@ import type { Recipe } from '../types';
 import { useToast } from './Toast';
 import { DraggableRecipeCard } from './DraggableRecipeCard';
 import { useRecipes } from '../contexts/RecipeContext';
+import { toLocalDateKey } from '../services/dateService';
 import { Trash2Icon } from './icons';
 
 const days = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
@@ -106,7 +107,7 @@ export const MealPlannerApp: React.FC<MealPlannerAppProps> = ({ onAddCalendarEve
                         {days.map((day, index) => {
                             const targetDate = new Date(today);
                             targetDate.setDate(today.getDate() - currentDayOfWeek + index);
-                            const dateKey = targetDate.toISOString().split('T')[0];
+                            const dateKey = toLocalDateKey(targetDate);
 
                             return (
                                 <DayColumn

@@ -39,7 +39,7 @@ export async function generateStoryImage(textSegment: string): Promise<string> {
         },
     });
 
-    const base64ImageBytes = response.generatedImages[0].image.imageBytes;
+    const base64ImageBytes = response.generatedImages?.[0]?.image?.imageBytes;
     if (!base64ImageBytes) {
         throw new Error("Image generation failed.");
     }

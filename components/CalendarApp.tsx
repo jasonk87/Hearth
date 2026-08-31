@@ -2,6 +2,7 @@
 
 import React, { useState, useMemo } from 'react';
 import type { CalendarEvent, WeatherData, CalendarSource, User } from '../types';
+import { toLocalDateKey } from '../services/dateService';
 import { SunIcon, CloudIcon, CloudRainIcon, CloudLightningIcon, CloudSunIcon, ChevronLeftIcon, ChevronRightIcon } from './icons';
 
 const WeatherIcon: React.FC<{ condition: WeatherData['condition']; className?: string }> = ({ condition, className }) => {
@@ -47,7 +48,7 @@ export const CalendarApp: React.FC<CalendarAppProps> = ({ eventsBySource, weathe
     for (let i = 1; i <= totalDays; i++) { days.push(new Date(year, month, i)); }
 
     const today = new Date();
-    const todayKey = today.toISOString().split('T')[0];
+    const todayKey = toLocalDateKey(today);
 
     return (
         <div className="flex flex-col h-full relative text-slate-700">
@@ -66,7 +67,7 @@ export const CalendarApp: React.FC<CalendarAppProps> = ({ eventsBySource, weathe
                 {days.map((day, index) => {
                     if (!day) return <div key={`empty-${index}`} className="rounded-lg bg-slate-100/40"></div>;
                     
-                    const dayKey = day.toISOString().split('T')[0];
+                    const dayKey = toLocalDateKey(day);
                     const isToday = dayKey === todayKey;
                     const dayEvents = visibleEvents[dayKey] || [];
                     

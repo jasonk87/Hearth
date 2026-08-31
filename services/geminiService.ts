@@ -1,14 +1,28 @@
-import { GoogleGenAI, FunctionDeclaration, Type, Blob, Modality } from '@google/genai';
+type FunctionDeclaration = { name: string; parameters: Record<string, unknown> };
+type Blob = { data: string; mimeType: string };
 import type { User, HangmanWord } from '../types';
-import { getLocalEvents } from './eventService';
 
-const GEMINI_API_KEY = import.meta.env.VITE_GEMINI_API_KEY;
-export const USE_FAKE_DATA =
-    import.meta.env.VITE_USE_FAKE_DATA === 'true' ||
-    !GEMINI_API_KEY ||
-    GEMINI_API_KEY === 'YOUR_GEMINI_API_KEY';
+export const USE_FAKE_DATA = import.meta.env.VITE_USE_FAKE_DATA === 'true';
 
-export const ai = new GoogleGenAI({ apiKey: GEMINI_API_KEY || 'mock-api-key' });
+const postGemini = async <T,>(endpoint: string, body: unknown): Promise<T> => {
+    const response = await fetch(endpoint, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+    });
+    if (!response.ok) throw new Error(`AI request failed (${response.status})`);
+    return response.json() as Promise<T>;
+};
+
+/** Browser-safe Gemini client: credentials remain in the server environment. */
+export const ai = {
+    models: {
+        generateContent: (request: unknown) => postGemini<{ text: string; candidates?: any[] }>('/api/gemini/content', request),
+        generateImages: (request: unknown) => postGemini<{ generatedImages?: Array<{ image?: { imageBytes?: string } }> }>('/api/gemini/images', request),
+    },
+};
+
+const Type = { OBJECT: 'OBJECT', ARRAY: 'ARRAY', STRING: 'STRING', INTEGER: 'INTEGER' } as const;
 
 // --- Hangman Game ---
 const hangmanWordSchema = {

@@ -1,8 +1,5 @@
-import axios from 'axios';
 import { Recipe } from '../types';
 
-const SPOONACULAR_API_KEY = import.meta.env.VITE_SPOONACULAR_API_KEY || '5f8fb4a5b53a4f3fb5fc28fdc56b8c4b';
-const SPOONACULAR_BASE_URL = 'https://api.spoonacular.com/recipes';
 const RECIPE_CACHE_KEY = 'hearth-spoonacular-cache-v1';
 
 const mapSpoonacularRecipe = (recipe: any): Recipe => {
@@ -29,7 +26,7 @@ const mapSpoonacularRecipe = (recipe: any): Recipe => {
     const cleanSummary = recipe.summary ? recipe.summary.replace(/<[^>]*>?/gm, '') : '';
 
     return {
-        id: recipe.id.toString(),
+        id: String(recipe.id ?? `spoonacular:${recipe.title}:${recipe.image ?? ''}`),
         recipeName: recipe.title,
         description: cleanSummary || "A delicious Spoonacular recipe.",
         ingredients: ingredientList,
@@ -57,15 +54,12 @@ export async function getPersonalizedRecipes(userId?: string): Promise<Recipe[]>
     }
 
     try {
-        const response = await axios.get(`${SPOONACULAR_BASE_URL}/random`, {
-            params: {
-                number: 12,
-                apiKey: SPOONACULAR_API_KEY
-            }
-        });
+        const response = await fetch('/api/recipes/random?number=12');
+        if (!response.ok) throw new Error(`Recipe request failed (${response.status})`);
+        const data = await response.json();
 
-        if (response.data && response.data.recipes) {
-            const recipes = response.data.recipes.map(mapSpoonacularRecipe);
+        if (data?.recipes) {
+            const recipes = data.recipes.map(mapSpoonacularRecipe);
             
             try {
                 localStorage.setItem(RECIPE_CACHE_KEY, JSON.stringify({
@@ -87,19 +81,13 @@ export async function getPersonalizedRecipes(userId?: string): Promise<Recipe[]>
 
 export async function searchRecipes(query: string): Promise<Recipe[]> {
     try {
-        const response = await axios.get(`${SPOONACULAR_BASE_URL}/complexSearch`, {
-            params: {
-                query: query,
-                number: 12,
-                addRecipeInformation: true,
-                fillIngredients: true,
-                instructionsRequired: true,
-                apiKey: SPOONACULAR_API_KEY
-            }
-        });
+        const params = new URLSearchParams({ query, number: '12', addRecipeInformation: 'true', fillIngredients: 'true', instructionsRequired: 'true' });
+        const response = await fetch(`/api/recipes/complexSearch?${params}`);
+        if (!response.ok) throw new Error(`Recipe search failed (${response.status})`);
+        const data = await response.json();
 
-        if (response.data && response.data.results) {
-            return response.data.results.map(mapSpoonacularRecipe);
+        if (data?.results) {
+            return data.results.map(mapSpoonacularRecipe);
         }
         return [];
     } catch (error) {

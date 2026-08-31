@@ -1,7 +1,8 @@
-import { Type } from '@google/genai';
+import { Type } from './schemaTypes';
 import { CalendarEvent, GroceryItem, WeatherData, ProactiveSuggestion } from '../types';
 import { ai, USE_FAKE_DATA } from './geminiService';
 import { getLocalEvents } from './eventService';
+import { daysFromToday } from './dateService';
 
 const proactiveSuggestionSchema = {
     type: Type.OBJECT,
@@ -32,11 +33,8 @@ export async function getProactiveSuggestion(
         return Promise.resolve(null);
     }
     const relevantEvents = events.filter(e => {
-        const eventDate = new Date(e.date);
-        const today = new Date();
-        today.setHours(0,0,0,0);
-        const diffDays = (eventDate.getTime() - today.getTime()) / (1000 * 3600 * 24);
-        return diffDays >= 0 && diffDays <= 3; // Look at today and next 3 days
+        const diffDays = daysFromToday(e.date);
+        return diffDays !== null && diffDays >= 0 && diffDays <= 3; // Look at today and next 3 days
     }).map(e => ({ title: e.title, date: e.date }));
 
     const incompleteGroceries = groceryList.filter(i => !i.completed).map(i => i.name);
@@ -46,11 +44,8 @@ export async function getProactiveSuggestion(
     // Fetch events for the user's location rather than a fixed city.
     const localEvents = await getLocalEvents(locationQuery);
     const upcomingLocalEvents = localEvents.filter(e => {
-        const eventDate = new Date(e.date);
-        const today = new Date();
-        today.setHours(0,0,0,0);
-        const diffDays = (eventDate.getTime() - today.getTime()) / (1000 * 3600 * 24);
-        return diffDays >= 0 && diffDays <= 2; // Look at today and next 2 days
+        const diffDays = daysFromToday(e.date);
+        return diffDays !== null && diffDays >= 0 && diffDays <= 2; // Look at today and next 2 days
     });
 
     const prompt = `

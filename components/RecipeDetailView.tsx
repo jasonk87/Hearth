@@ -14,11 +14,11 @@ interface RecipeDetailViewProps {
 
 export const RecipeDetailView: React.FC<RecipeDetailViewProps> = ({ recipe, onClose, onAddToGroceryList, onScheduleDinner }) => {
   const { isRecipeSaved, saveRecipe, removeRecipe } = useRecipes();
-  const saved = isRecipeSaved(recipe.id?.toString() || '');
+  const saved = isRecipeSaved(recipe.id);
 
   const toggleSave = () => {
       if (saved) {
-          removeRecipe(recipe.id?.toString() || '');
+          removeRecipe(recipe.id);
       } else {
           saveRecipe(recipe);
       }

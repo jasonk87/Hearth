@@ -1,14 +1,13 @@
 import { LocalEvent } from '../types';
-import { ai } from './geminiService';
+import { normalizeEventDate } from './dateService';
 
-const API_KEY = import.meta.env.VITE_SERPAPI_KEY;
-const USE_FAKE_DATA = import.meta.env.VITE_USE_FAKE_DATA === 'true' || !API_KEY;
+const USE_FAKE_DATA = import.meta.env.VITE_USE_FAKE_DATA === 'true';
 
-const fallbackEvents: LocalEvent[] = [
+const fallbackEvents = (): LocalEvent[] => [
   {
     id: '1',
     title: 'Farmers Market',
-    date: 'Upcoming Saturday',
+    date: normalizeEventDate('Upcoming Saturday')!,
     time: '9:00 AM',
     location: 'Central Square',
     description: 'Fresh produce, local crafts, and live music.',
@@ -17,7 +16,7 @@ const fallbackEvents: LocalEvent[] = [
   {
     id: '2',
     title: 'Outdoor Movie Night: The Goonies',
-    date: 'Upcoming Friday',
+    date: normalizeEventDate('Upcoming Friday')!,
     time: '8:30 PM',
     location: 'City Park',
     description: 'Bring a blanket and enjoy a classic movie under the stars.',
@@ -26,7 +25,7 @@ const fallbackEvents: LocalEvent[] = [
   {
     id: '3',
     title: 'Live Jazz at The Blue Note',
-    date: 'Upcoming Sunday',
+    date: normalizeEventDate('Upcoming Sunday')!,
     time: '7:00 PM',
     location: 'The Blue Note Club',
     description: 'An evening of smooth jazz with the Miles Davis Quintet tribute band.',
@@ -37,32 +36,18 @@ const fallbackEvents: LocalEvent[] = [
 export const getLocalEvents = async (locationQuery: string): Promise<LocalEvent[]> => {
   if (USE_FAKE_DATA) {
     console.log('Using fallback local event data');
-    return Promise.resolve(fallbackEvents);
+    return Promise.resolve(fallbackEvents());
   }
 
   try {
     console.log(`HEARTH DEBUG: Fetching events for: ${locationQuery}`);
     
-    // 2. Expand search radius to 3 hours using Gemini
-    let surroundingCities: string[] = [];
-    try {
-        const aiResponse = await ai.models.generateContent({
-            model: 'gemini-2.5-flash-lite',
-            contents: `List exactly 2 major metropolitan cities that are within a 3-hour drive of ${locationQuery}. Return ONLY a comma-separated list of the city and state names (e.g. "Nashville TN, Louisville KY"). Do not include ${locationQuery} itself. No markdown, no extra text.`,
-        });
-        const citiesText = aiResponse.text.trim();
-        surroundingCities = citiesText.split(',').map(c => c.trim()).filter(c => c.length > 0);
-        console.log(`HEARTH DEBUG: Expanded 3-hour radius cities:`, surroundingCities);
-    } catch (e) {
-        console.warn("Failed to get surrounding cities from Gemini", e);
-    }
-
-    const searchQueries = [locationQuery, ...surroundingCities].map(city => `events in ${city}`);
+    const searchQueries = [`events in ${locationQuery}`];
     
     // 3. Fire all SerpApi requests in parallel via the Vite proxy
     const fetchPromises = searchQueries.map(async (queryStr) => {
         const query = encodeURIComponent(queryStr);
-        const proxyUrl = `/api/serp/search.json?engine=google_events&q=${query}&htichips=date:next_month&api_key=${API_KEY}`;
+        const proxyUrl = `/api/serp/search.json?engine=google_events&q=${query}&htichips=date:next_month`;
         try {
             const response = await fetch(proxyUrl);
             if (!response.ok) return null;
@@ -93,13 +78,13 @@ export const getLocalEvents = async (locationQuery: string): Promise<LocalEvent[
     
     if (allRawEvents.length === 0) {
         console.log("No events found from SerpApi. Falling back to default data.");
-        return fallbackEvents;
+        return fallbackEvents();
     }
 
     const rawEvents = allRawEvents.map((event: any, index: number) => ({
       id: (event.title + index).replace(/\s+/g, ''),
       title: event.title,
-      date: event.date?.start_date || 'Upcoming',
+      date: normalizeEventDate(event.date?.start_date || '') || '',
       time: event.date?.when || 'Check details',
       location: event.address?.join(', ') || event.venue?.name || locationQuery,
       description: event.description || '',
@@ -111,23 +96,21 @@ export const getLocalEvents = async (locationQuery: string): Promise<LocalEvent[
     rawEvents.sort((a: any, b: any) => {
         if (!a._rawDate) return 1;
         if (!b._rawDate) return -1;
-        // Google Events dates look like "Jul 27" or "Aug 1"
-        const currentYear = new Date().getFullYear();
-        const dateA = new Date(`${a._rawDate}, ${currentYear}`);
-        const dateB = new Date(`${b._rawDate}, ${currentYear}`);
+        const dateA = normalizeEventDate(a._rawDate || '');
+        const dateB = normalizeEventDate(b._rawDate || '');
         
-        if (isNaN(dateA.getTime())) return 1;
-        if (isNaN(dateB.getTime())) return -1;
+        if (!dateA) return 1;
+        if (!dateB) return -1;
         
-        return dateA.getTime() - dateB.getTime();
+        return dateA.localeCompare(dateB);
     });
 
     return rawEvents.map((e: any) => {
         delete e._rawDate;
-        return e as LocalEvent;
-    });
+        return e.date ? e as LocalEvent : null;
+    }).filter((event): event is LocalEvent => event !== null);
   } catch (error) {
     console.error('Failed to fetch local events via SerpApi:', error);
-    return fallbackEvents;
+    return fallbackEvents();
   }
 };

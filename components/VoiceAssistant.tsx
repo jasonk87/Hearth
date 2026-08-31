@@ -142,21 +142,21 @@ export const VoiceAssistant: React.FC<VoiceAssistantProps> = (props) => {
         finish('Note added.');
         return;
       case 'update_note': {
-        const note = findByPhrase(props.notes, command.match, item => item.text);
+        const note = findByPhrase<Note>(props.notes, command.match, item => item.text);
         if (!note || !command.replacement) return finish(`I couldn't find that note or its replacement text.`, 'error');
         props.onUpdateNote(note.id, command.replacement);
         finish('Note updated.');
         return;
       }
       case 'delete_note': {
-        const note = findByPhrase(props.notes, command.match || command.text, item => item.text);
+        const note = findByPhrase<Note>(props.notes, command.match || command.text, item => item.text);
         if (!note) return finish(`I couldn't find that note.`, 'error');
         props.onDeleteNote(note.id);
         finish('Note deleted.');
         return;
       }
       case 'change_note_color': {
-        const note = findByPhrase(props.notes, command.match, item => item.text);
+        const note = findByPhrase<Note>(props.notes, command.match, item => item.text);
         const color = normalize(command.color || '') as NoteColor;
         if (!note || !['yellow', 'pink', 'blue', 'green'].includes(color)) return finish(`I couldn't update that note color.`, 'error');
         props.onChangeNoteColor(note.id, color);
@@ -169,21 +169,21 @@ export const VoiceAssistant: React.FC<VoiceAssistantProps> = (props) => {
         finish(`${command.text} added to groceries.`);
         return;
       case 'complete_grocery': {
-        const item = findByPhrase(props.groceryList.filter(grocery => !grocery.completed), command.match || command.text, grocery => grocery.name);
+        const item = findByPhrase<GroceryItem>(props.groceryList.filter(grocery => !grocery.completed), command.match || command.text, grocery => grocery.name);
         if (!item) return finish(`I couldn't find that unfinished grocery item.`, 'error');
         props.onToggleGroceryItem(item.id);
         finish(`${item.name} checked off.`);
         return;
       }
       case 'rename_grocery': {
-        const item = findByPhrase(props.groceryList, command.match, grocery => grocery.name);
+        const item = findByPhrase<GroceryItem>(props.groceryList, command.match, grocery => grocery.name);
         if (!item || !command.replacement) return finish(`I couldn't rename that grocery item.`, 'error');
         props.onRenameGroceryItem(item.id, command.replacement);
         finish(`Renamed ${item.name} to ${command.replacement}.`);
         return;
       }
       case 'remove_grocery': {
-        const item = findByPhrase(props.groceryList, command.match || command.text, grocery => grocery.name);
+        const item = findByPhrase<GroceryItem>(props.groceryList, command.match || command.text, grocery => grocery.name);
         if (!item) return finish(`I couldn't find that grocery item.`, 'error');
         props.onRemoveGroceryItem(item.id);
         finish(`${item.name} removed.`);

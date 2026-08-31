@@ -100,7 +100,9 @@ To run the application with real data, you'll need to provide your Google Client
 
 ```
 VITE_GOOGLE_CLIENT_ID="YOUR_GOOGLE_CLIENT_ID"
-VITE_GEMINI_API_KEY="YOUR_GEMINI_API_KEY"
+GEMINI_API_KEY="YOUR_GEMINI_API_KEY"
+SERPAPI_KEY="YOUR_SERPAPI_KEY"
+SPOONACULAR_API_KEY="YOUR_SPOONACULAR_API_KEY"
 ```
 
 You can obtain a Google Client ID from the [Google Cloud Console](https://console.cloud.google.com/) and a Gemini API Key from [Google AI Studio](https://makersuite.google.com/).

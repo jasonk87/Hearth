@@ -19,18 +19,18 @@ interface CalendarContextType {
 
 const CalendarContext = createContext<CalendarContextType | undefined>(undefined);
 
-const getEventMinutes = (time: string): number => {
+export const calendarTimeToMinutes = (time: string): number => {
   if (time.toLowerCase() === 'all day') return -1;
 
-  const match = /^(\d{1,2}):(\d{2})\s*(am|pm)$/i.exec(time.trim());
+  const match = /^(\d{1,2})(?::(\d{2}))?\s*(am|pm)$/i.exec(time.trim());
   if (!match) return Number.MAX_SAFE_INTEGER;
 
   const hours = Number(match[1]) % 12 + (match[3].toLowerCase() === 'pm' ? 12 : 0);
-  return hours * 60 + Number(match[2]);
+  return hours * 60 + Number(match[2] || 0);
 };
 
 const compareCalendarEvents = (left: CalendarEvent, right: CalendarEvent): number => {
-  const timeDifference = getEventMinutes(left.time) - getEventMinutes(right.time);
+  const timeDifference = calendarTimeToMinutes(left.time) - calendarTimeToMinutes(right.time);
   if (timeDifference !== 0) return timeDifference;
 
   const titleDifference = left.title.localeCompare(right.title);
@@ -55,14 +55,14 @@ export const CalendarProvider: React.FC<{ children: React.ReactNode }> = ({ chil
   useEffect(() => {
     const fetchWeather = async () => {
         try {
-            const forecast = await getWeatherForecast();
+            const forecast = await getWeatherForecast(state.location);
             setWeatherData(forecast);
         } catch (error) {
             console.error("Failed to fetch weather data:", error);
         }
     };
     fetchWeather();
-  }, []);
+  }, [state.location]);
 
   const addCalendarEvent = useCallback((title: string, date: string, time: string) => {
     const newEvent: CalendarEvent = {
@@ -105,7 +105,7 @@ export const CalendarProvider: React.FC<{ children: React.ReactNode }> = ({ chil
         return acc;
     }, {} as Record<string, CalendarEvent[]>);
 
-    Object.values(groupedEvents).forEach(dayEvents => dayEvents.sort(compareCalendarEvents));
+    Object.values(groupedEvents).forEach(dayEvents => (dayEvents as CalendarEvent[]).sort(compareCalendarEvents));
     return groupedEvents;
   }, [events]);
 
@@ -119,7 +119,7 @@ export const CalendarProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     }, { family: {}, google: {} } as Record<CalendarSource, Record<string, CalendarEvent[]>>);
 
     Object.values(groupedEvents).forEach(sourceEvents => {
-      Object.values(sourceEvents).forEach(dayEvents => dayEvents.sort(compareCalendarEvents));
+      Object.values(sourceEvents).forEach(dayEvents => (dayEvents as CalendarEvent[]).sort(compareCalendarEvents));
     });
     return groupedEvents;
   }, [events]);

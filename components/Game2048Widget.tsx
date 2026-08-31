@@ -47,14 +47,14 @@ const rotateBoard = (board: number[][]): number[][] => {
     return newBoard;
 };
 
-const move = (board: number[][], direction: 'left' | 'right' | 'up' | 'down'): { newBoard: number[][], score: number, moved: boolean } => {
+export const moveBoard = (board: number[][], direction: 'left' | 'right' | 'up' | 'down'): { newBoard: number[][], score: number, moved: boolean } => {
     let currentBoard = board.map(row => [...row]);
     let totalScore = 0;
     let rotations = 0;
     
-    if (direction === 'up') { rotations = 1; }
+    if (direction === 'up') { rotations = 3; }
     else if (direction === 'right') { rotations = 2; }
-    else if (direction === 'down') { rotations = 3; }
+    else if (direction === 'down') { rotations = 1; }
 
     for(let i=0; i<rotations; i++) {
         currentBoard = rotateBoard(currentBoard);
@@ -122,7 +122,7 @@ export const Game2048Widget: React.FC = () => {
 
   const handleMove = useCallback((direction: 'left' | 'right' | 'up' | 'down') => {
     if (gameOver) return;
-    const { newBoard, score: moveScore, moved } = move(board, direction);
+    const { newBoard, score: moveScore, moved } = moveBoard(board, direction);
     if (moved) {
       const boardWithNewTile = addRandomTile(newBoard);
       setBoard(boardWithNewTile);
@@ -135,12 +135,11 @@ export const Game2048Widget: React.FC = () => {
 
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
-      e.preventDefault();
       switch (e.key) {
-        case 'ArrowUp': handleMove('up'); break;
-        case 'ArrowDown': handleMove('down'); break;
-        case 'ArrowLeft': handleMove('left'); break;
-        case 'ArrowRight': handleMove('right'); break;
+        case 'ArrowUp': e.preventDefault(); handleMove('up'); break;
+        case 'ArrowDown': e.preventDefault(); handleMove('down'); break;
+        case 'ArrowLeft': e.preventDefault(); handleMove('left'); break;
+        case 'ArrowRight': e.preventDefault(); handleMove('right'); break;
       }
     };
     window.addEventListener('keydown', handleKeyDown);

@@ -4,6 +4,7 @@ import axios from 'axios';
 import { GoogleProfile, GoogleCalendarEvent } from '../types';
 
 const ACCESS_TOKEN_KEY = 'google_access_token';
+const GOOGLE_ACCOUNT_KEY = 'hearth_google_account';
 const USE_FAKE_DATA = import.meta.env.VITE_USE_FAKE_DATA === 'true';
 
 export const setAccessToken = (token: string | null) => {
@@ -21,6 +22,8 @@ export const getAccessToken = () => {
 export const logout = () => {
   googleLogout();
   setAccessToken(null);
+  clearCalendarCache();
+  localStorage.removeItem(GOOGLE_ACCOUNT_KEY);
 };
 
 export const getProfile = async (): Promise<GoogleProfile | null> => {
@@ -49,8 +52,23 @@ export const getProfile = async (): Promise<GoogleProfile | null> => {
 };
 
 
-const CALENDAR_CACHE_KEY = 'hearth_calendar_cache_v2';
+const CALENDAR_CACHE_KEY = 'hearth_calendar_cache_v3';
 const CACHE_DURATION_MS = 60 * 60 * 1000; // 1 hour
+
+const calendarCacheKey = () => {
+  const account = localStorage.getItem(GOOGLE_ACCOUNT_KEY);
+  return account ? `${CALENDAR_CACHE_KEY}:${account}` : null;
+};
+
+export const setCalendarAccount = (account: string | null | undefined) => {
+  if (account) localStorage.setItem(GOOGLE_ACCOUNT_KEY, account.toLowerCase());
+  else localStorage.removeItem(GOOGLE_ACCOUNT_KEY);
+};
+
+export const clearCalendarCache = () => {
+  const activeKey = calendarCacheKey();
+  if (activeKey) localStorage.removeItem(activeKey);
+};
 
 export const getCalendarEvents = async (forceRefresh = false): Promise<GoogleCalendarEvent[]> => {
   if (USE_FAKE_DATA) {
@@ -71,7 +89,8 @@ export const getCalendarEvents = async (forceRefresh = false): Promise<GoogleCal
   }
   
   if (!forceRefresh) {
-    const cachedData = localStorage.getItem(CALENDAR_CACHE_KEY);
+    const cacheKey = calendarCacheKey();
+    const cachedData = cacheKey ? localStorage.getItem(cacheKey) : null;
     if (cachedData) {
       try {
         const { timestamp, events } = JSON.parse(cachedData);
@@ -156,10 +175,8 @@ export const getCalendarEvents = async (forceRefresh = false): Promise<GoogleCal
       console.log("HEARTH DEBUG: Combined and deduplicated events:", finalEvents);
       
       // Update cache
-      localStorage.setItem(CALENDAR_CACHE_KEY, JSON.stringify({
-        timestamp: Date.now(),
-        events: finalEvents
-      }));
+      const cacheKey = calendarCacheKey();
+      if (cacheKey) localStorage.setItem(cacheKey, JSON.stringify({ timestamp: Date.now(), events: finalEvents }));
 
       return finalEvents;
     } catch (error: any) {

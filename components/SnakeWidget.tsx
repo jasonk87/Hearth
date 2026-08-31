@@ -36,12 +36,11 @@ export const SnakeWidget: React.FC = () => {
   }, []);
 
   const handleKeyDown = useCallback((e: KeyboardEvent) => {
-    e.preventDefault();
     switch (e.key) {
-      case 'ArrowUp': if (direction !== 'DOWN') setDirection('UP'); break;
-      case 'ArrowDown': if (direction !== 'UP') setDirection('DOWN'); break;
-      case 'ArrowLeft': if (direction !== 'RIGHT') setDirection('LEFT'); break;
-      case 'ArrowRight': if (direction !== 'LEFT') setDirection('RIGHT'); break;
+      case 'ArrowUp': e.preventDefault(); if (direction !== 'DOWN') setDirection('UP'); break;
+      case 'ArrowDown': e.preventDefault(); if (direction !== 'UP') setDirection('DOWN'); break;
+      case 'ArrowLeft': e.preventDefault(); if (direction !== 'RIGHT') setDirection('LEFT'); break;
+      case 'ArrowRight': e.preventDefault(); if (direction !== 'LEFT') setDirection('RIGHT'); break;
     }
   }, [direction]);
 

@@ -64,7 +64,11 @@ export const loadPersistentState = (): Promise<PersistentAppState> => {
 
       await updatePersistentState(migratedState);
       return migratedState;
-    })();
+    })().catch((error) => {
+      // A transient backend/network failure must not poison all later retries.
+      loadPromise = null;
+      throw error;
+    });
   }
 
   return loadPromise;

@@ -1,5 +1,6 @@
-import { Type } from '@google/genai';
+import { Type } from './schemaTypes';
 import { ai, USE_FAKE_DATA } from './geminiService';
+import { toLocalDateKey } from './dateService';
 
 export type VoiceAction =
   | 'navigate'
@@ -90,7 +91,7 @@ Choose exactly one action:
 - search_recipes(query), launch_game(game), start_story(query).
 - general_query(query) only for information, advice, explanation, or conversation—not app actions.
 
-Preserve names, content, groceries, event titles, meals, dates, and times faithfully. Infer obvious fields from natural language, but do not invent critical missing details. Today is ${new Date().toISOString().split('T')[0]}. Request: ${JSON.stringify(transcript)}`,
+Preserve names, content, groceries, event titles, meals, dates, and times faithfully. Infer obvious fields from natural language, but do not invent critical missing details. Today is ${toLocalDateKey()}. Request: ${JSON.stringify(transcript)}`,
       config: {
         responseMimeType: 'application/json',
         responseSchema: commandSchema,
@@ -114,10 +115,10 @@ export const resolveSpokenDate = (day?: string, explicitDate?: string): string |
 
   const today = new Date();
   today.setHours(12, 0, 0, 0);
-  if (value === 'today') return today.toISOString().split('T')[0];
+  if (value === 'today') return toLocalDateKey(today);
   if (value === 'tomorrow') {
     today.setDate(today.getDate() + 1);
-    return today.toISOString().split('T')[0];
+    return toLocalDateKey(today);
   }
 
   const weekdays = ['sunday', 'monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday'];
@@ -125,5 +126,5 @@ export const resolveSpokenDate = (day?: string, explicitDate?: string): string |
   if (weekday < 0) return null;
   const difference = (weekday - today.getDay() + 7) % 7;
   today.setDate(today.getDate() + difference);
-  return today.toISOString().split('T')[0];
+  return toLocalDateKey(today);
 };

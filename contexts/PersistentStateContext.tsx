@@ -49,6 +49,12 @@ export const PersistentStateProvider: React.FC<{ children: React.ReactNode }> = 
     setState(nextState);
     void updatePersistentState({ [key]: nextValue } as Partial<PersistentAppState>).catch((error) => {
       console.error(`Failed to save persistent Hearth field "${key}":`, error);
+      // Roll back only this failed field, while preserving subsequent edits to other fields.
+      if (stateRef.current[key] === nextValue) {
+        const recoveredState = { ...stateRef.current, [key]: currentState[key] };
+        stateRef.current = recoveredState;
+        setState(recoveredState);
+      }
     });
   }, []);
 

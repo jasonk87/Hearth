@@ -57,7 +57,7 @@ export interface ProactiveSuggestion {
 }
 
 export interface Recipe {
-  id?: string | number;
+  id: string;
   recipeName: string;
   description: string;
   ingredients: string[];
@@ -124,6 +124,7 @@ export interface SmartHomeState {
 export interface GoogleProfile {
   name: string;
   picture: string;
+  email?: string;
 }
 
 export interface GoogleCalendarEvent {
