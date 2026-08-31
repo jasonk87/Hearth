@@ -111,7 +111,10 @@ export const LocalEvents: React.FC<{ onAddCalendarEvent: (title: string, date: s
     .map(event => scoreLocalEvent(event, calendarEvents, weatherData, preferences))
     .sort((left, right) => right.score - left.score), [events, calendarEvents, weatherData, preferences]);
   const filtered = recommendations.filter(recommendation => filterRecommendation(recommendation, activeFilter));
-  const featured = (recommendations.filter(item => isThisWeekend(item.event.date)).length ? recommendations.filter(item => isThisWeekend(item.event.date)) : recommendations).slice(0, 3);
+  const weekendRecommendations = recommendations.filter(item =>
+    isThisWeekend(item.event.date) && (new Date().getDay() !== 0 || isLaterToday(item.event)),
+  );
+  const featured = (weekendRecommendations.length ? weekendRecommendations : recommendations).slice(0, 3);
 
   const setReaction = (event: LocalEvent, reaction: LocalEventReaction) => {
     setField('localEventPreferences', previous => ({ ...previous, reactions: { ...previous.reactions, [event.id]: reaction }, seen: previous.seen || [] }));
@@ -134,7 +137,7 @@ export const LocalEvents: React.FC<{ onAddCalendarEvent: (title: string, date: s
   const today = recommendations.filter(item => isLaterToday(item.event)).slice(0, 6);
   const nearestWeekend = nearestWeekendDateKeys();
   const saturday = recommendations.filter(item => item.event.date === nearestWeekend.saturday).slice(0, 6);
-  const sunday = recommendations.filter(item => item.event.date === nearestWeekend.sunday).slice(0, 6);
+  const sunday = recommendations.filter(item => item.event.date === nearestWeekend.sunday && (new Date().getDay() !== 0 || isLaterToday(item.event))).slice(0, 6);
 
   if (loading) return <Loader message="Finding the best things to do nearby..." />;
 

@@ -48,4 +48,12 @@ describe('Hearth event scoring', () => {
     expect(isThisWeekend('2026-09-06', sundayMorning)).toBe(true);
     expect(isThisWeekend('2026-09-12', sundayMorning)).toBe(false);
   });
+
+  it('keeps only remaining Sunday events in Sunday-specific sections', () => {
+    const sundayAfternoon = new Date(2026, 8, 6, 16);
+    const morningEvent = { ...event, date: '2026-09-06', time: '9:00 AM' };
+    const eveningEvent = { ...event, date: '2026-09-06', time: '7:00 PM' };
+    const remainingWeekend = [morningEvent, eveningEvent].filter(item => isThisWeekend(item.date, sundayAfternoon) && isLaterToday(item, sundayAfternoon));
+    expect(remainingWeekend).toEqual([eveningEvent]);
+  });
 });
