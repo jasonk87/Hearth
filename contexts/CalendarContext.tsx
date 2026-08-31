@@ -45,7 +45,8 @@ export const CalendarProvider: React.FC<{ children: React.ReactNode }> = ({ chil
   const [events, setEvents] = useState<CalendarEvent[]>(state.familyEvents);
   
   const [weatherData, setWeatherData] = useState<WeatherData[]>([]);
-  const [weatherStatus, setWeatherStatus] = useState<'idle' | 'loading' | 'ready' | 'error'>('idle');
+  // Start as loading so the briefing cannot race the initial location/weather effect.
+  const [weatherStatus, setWeatherStatus] = useState<'idle' | 'loading' | 'ready' | 'error'>('loading');
   
   const dinnerPlan = state.dinnerPlan;
 

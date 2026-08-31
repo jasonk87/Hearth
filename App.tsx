@@ -268,7 +268,9 @@ function AppContent() {
     const hasHadBriefingToday = briefingStatus[FAMILY_USER.id] === todayKey;
     const isMorning = currentHour >= 5 && currentHour < 12;
 
-    if (isMorning && !hasHadBriefingToday && weatherStatus === 'ready' && weatherData.length > 0) {
+    // Only wait for an in-progress request. A missing location or a temporary
+    // weather failure should still receive a useful weather-free briefing.
+    if (isMorning && !hasHadBriefingToday && weatherStatus !== 'loading') {
       triggerDailyBriefing(FAMILY_USER);
     }
   }, [triggerDailyBriefing, briefingStatus, isGeneratingBriefing.active, briefingData, briefingRetryAt, weatherStatus, weatherData.length]);
